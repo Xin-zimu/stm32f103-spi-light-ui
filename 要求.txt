@@ -1,0 +1,940 @@
+# STM32F103 SPI OLED GIF 动画显示任务说明
+
+## 0. 给 Codex 的总要求
+
+你现在接手我的 STM32F103C8T6 工程。
+
+请先阅读工程目录和现有代码结构，不要一上来大改整个项目。
+本任务目标是：在现有裸机工程中新增 **SPI OLED 显示 GIF 动画** 功能。
+
+注意：
+STM32 不直接播放 `.gif` 文件。
+GIF 必须在电脑端预处理成多帧 OLED 位图数组，STM32 只负责按帧刷新 OLED。
+
+---
+
+## 1. 项目背景
+
+我的开发板是：
+
+```text
+STM32F103C8T6 最小系统板
+Keil5
+STM32F10x 标准外设库
+裸机 while(1) 轮询结构
+```
+
+我之前已经做过：
+
+```text
+I2C OLED 显示
+光敏传感器 AO/DO
+DS18B20 温度采集
+UART 命令解析
+非阻塞任务调度
+状态机
+模块化开发
+```
+
+当前项目思路是：
+
+```c
+int main(void)
+{
+    // 初始化各种模块
+
+    while (1)
+    {
+        // 反复调用各个 App_xxx_Task()
+        // 不使用 RTOS
+        // 不使用长时间 delay 阻塞主循环
+    }
+}
+```
+
+本次任务不要引入 RTOS，不要破坏我原来的裸机任务轮询结构。
+
+---
+
+## 2. 本次目标
+
+我要实现：
+
+```text
+SPI OLED 点亮
+↓
+OLED 清屏
+↓
+OLED 显示文字
+↓
+OLED 显示一张 128x64 黑白图片
+↓
+OLED 显示两张图片来回切换
+↓
+GIF 转换成 OLED 多帧数组
+↓
+STM32 循环播放多帧动画
+↓
+形成完整文档和排错清单
+```
+
+最终效果：
+
+```text
+把一个短 GIF 放到电脑上
+运行 Python 脚本转换成 C 数组
+把数组加入 Keil 工程
+烧录 STM32
+SPI OLED 循环播放这个动画
+```
+
+---
+
+## 3. 硬件默认约束
+
+默认我购买的是常见 SPI OLED：
+
+```text
+分辨率：128x64
+颜色：单色
+控制芯片：优先按 SSD1306 实现
+接口：4线 SPI
+```
+
+如果你发现代码需要兼容 SH1106，请在文档中说明 SSD1306 和 SH1106 的差异，不要直接混写导致我看不懂。
+
+---
+
+## 4. 推荐接线
+
+请优先使用 SPI2，避免和我之前项目里 PA5、PA6、PA7 的交通灯引脚冲突。
+
+推荐接线：
+
+```text
+OLED SCK / D0 / SCL     -> PB13
+OLED MOSI / D1 / SDA   -> PB15
+OLED CS                -> PB12
+OLED DC                -> PB14
+OLED RST / RES         -> PB10
+OLED VCC               -> 3.3V
+OLED GND               -> GND
+```
+
+说明：
+
+```text
+OLED 不需要 MISO
+所有模块必须共地
+VCC 优先接 3.3V
+如果模块标注支持 3.3V/5V，也优先使用 3.3V
+```
+
+请在文档里写清楚每个引脚的作用：
+
+```text
+SCK：SPI 时钟
+MOSI：SPI 数据输出
+CS：片选
+DC：命令/数据选择
+RST：OLED 复位
+VCC：电源
+GND：地
+```
+
+---
+
+## 5. 文件结构要求
+
+请根据我现有工程风格新增文件。
+文件名可以按现有命名习惯微调，但功能层次不能混乱。
+
+建议新增：
+
+```text
+BSP / Driver 层：
+bsp_spi_oled.c
+bsp_spi_oled.h
+
+应用层：
+app_anim.c
+app_anim.h
+
+动画数据：
+anim_frames.h
+anim_frames.c    可选
+
+工具脚本：
+Tools/gif_to_oled_frames.py
+
+文档：
+docs/spi_oled_gif_animation.md
+```
+
+要求：
+
+```text
+驱动层负责 SPI OLED 底层通信
+应用层负责动画播放逻辑
+工具脚本负责 GIF 转 C 数组
+文档负责接线、使用、排错
+不要把所有代码塞进 main.c
+不要覆盖我原来的 I2C OLED 驱动
+```
+
+如果工程里已经有 `oled.c / oled.h`，请不要直接覆盖。
+请新建 SPI OLED 驱动，例如：
+
+```text
+bsp_spi_oled.c
+bsp_spi_oled.h
+```
+
+或者：
+
+```text
+oled_spi.c
+oled_spi.h
+```
+
+但必须在文档中说明新旧 OLED 驱动的区别。
+
+---
+
+## 6. SPI OLED 驱动层要求
+
+请实现这些函数：
+
+```c
+void OLED_SPI_Init(void);
+void OLED_SPI_WriteByte(uint8_t data);
+
+void OLED_WriteCmd(uint8_t cmd);
+void OLED_WriteData(uint8_t data);
+
+void OLED_Reset(void);
+void OLED_Init(void);
+void OLED_Clear(void);
+void OLED_SetPos(uint8_t page, uint8_t col);
+
+void OLED_ShowImage128x64(const uint8_t *image);
+```
+
+### 6.1 GPIO 初始化要求
+
+请初始化：
+
+```text
+PB13 -> SPI2_SCK
+PB15 -> SPI2_MOSI
+PB12 -> OLED_CS
+PB14 -> OLED_DC
+PB10 -> OLED_RST
+```
+
+要求：
+
+```text
+使用 STM32F10x 标准外设库
+打开 GPIOB 时钟
+打开 SPI2 时钟
+SCK/MOSI 配置为复用推挽输出
+CS/DC/RST 配置为普通推挽输出
+```
+
+### 6.2 SPI 初始化要求
+
+使用硬件 SPI2。
+
+请设置：
+
+```text
+主机模式
+单向发送即可
+8位数据
+MSB first
+合适的 SPI Mode
+合适的分频系数
+软件管理 NSS
+```
+
+请给关键配置加中文注释，尤其是：
+
+```text
+为什么是主机模式
+为什么 OLED 不需要 MISO
+为什么用软件控制 CS
+为什么使用 8 位数据
+```
+
+### 6.3 OLED 初始化要求
+
+按 SSD1306 128x64 SPI OLED 初始化。
+
+要求：
+
+```text
+先复位 OLED
+再发送初始化命令
+初始化后清屏
+```
+
+允许在初始化阶段使用必要的短延时，例如 RST 复位延时。
+但不要在动画播放任务中使用长时间 delay。
+
+### 6.4 显示图片要求
+
+`OLED_ShowImage128x64()` 要能显示一整张 128x64 黑白图片。
+
+SSD1306 单色 128x64 全屏数据大小：
+
+```text
+128 * 64 / 8 = 1024 字节
+```
+
+也就是：
+
+```c
+#define OLED_WIDTH       128
+#define OLED_HEIGHT      64
+#define OLED_FRAME_SIZE  1024
+```
+
+图片数据格式按 SSD1306 页寻址方式：
+
+```text
+8 页
+每页 128 字节
+每个字节表示纵向 8 个像素
+总共 8 * 128 = 1024 字节
+```
+
+---
+
+## 7. 动画应用层要求
+
+请实现：
+
+```c
+void App_Anim_Init(void);
+void App_Anim_Task(void);
+```
+
+### 7.1 非阻塞播放要求
+
+必须使用 `Timing_GetTick()` 做非阻塞定时。
+不要在 `App_Anim_Task()` 里使用：
+
+```c
+delay_ms(100);
+```
+
+推荐逻辑：
+
+```c
+void App_Anim_Task(void)
+{
+    static uint32_t last_tick = 0;
+    static uint8_t frame_index = 0;
+
+    if (Timing_GetTick() - last_tick >= ANIM_FRAME_INTERVAL_MS)
+    {
+        last_tick = Timing_GetTick();
+
+        OLED_ShowImage128x64(anim_frames[frame_index]);
+
+        frame_index++;
+
+        if (frame_index >= ANIM_FRAME_COUNT)
+        {
+            frame_index = 0;
+        }
+    }
+}
+```
+
+### 7.2 宏定义要求
+
+请用宏统一管理：
+
+```c
+#define ANIM_FRAME_WIDTH        128
+#define ANIM_FRAME_HEIGHT       64
+#define ANIM_FRAME_SIZE         1024
+#define ANIM_FRAME_COUNT        xx
+#define ANIM_FRAME_INTERVAL_MS  100
+```
+
+### 7.3 播放效果要求
+
+初始阶段可以先用两张测试图片来回切换。
+不要一开始就塞真实 GIF 大数组。
+
+阶段顺序必须是：
+
+```text
+先单张图
+再两张图切换
+再多帧动画
+```
+
+---
+
+## 8. GIF 转换脚本要求
+
+请新增：
+
+```text
+Tools/gif_to_oled_frames.py
+```
+
+功能：
+
+```text
+读取 GIF
+拆分帧
+缩放到 128x64
+转成黑白图
+按 SSD1306 页格式取模
+生成 C 数组文件
+```
+
+### 8.1 命令行使用方式
+
+脚本至少支持：
+
+```powershell
+py Tools/gif_to_oled_frames.py input.gif anim_frames.c
+```
+
+更推荐支持：
+
+```powershell
+py Tools/gif_to_oled_frames.py input.gif Core/Src/anim_frames.c --max-frames 20 --threshold 128
+```
+
+如果我的工程没有 `Core/Src` 目录，请根据实际 Keil 工程目录输出到合适位置。
+
+### 8.2 参数要求
+
+请尽量支持这些参数：
+
+```text
+输入 GIF 路径
+输出 C 文件路径
+最大帧数 --max-frames
+二值化阈值 --threshold
+帧间隔 --interval
+是否反色 --invert
+```
+
+### 8.3 输出文件要求
+
+可以生成：
+
+```text
+anim_frames.h
+anim_frames.c
+```
+
+推荐头文件格式：
+
+```c
+#ifndef __ANIM_FRAMES_H
+#define __ANIM_FRAMES_H
+
+#include <stdint.h>
+
+#define ANIM_FRAME_WIDTH        128
+#define ANIM_FRAME_HEIGHT       64
+#define ANIM_FRAME_SIZE         1024
+#define ANIM_FRAME_COUNT        xx
+#define ANIM_FRAME_INTERVAL_MS  100
+
+extern const uint8_t anim_frames[ANIM_FRAME_COUNT][ANIM_FRAME_SIZE];
+
+#endif
+```
+
+推荐 C 文件格式：
+
+```c
+#include "anim_frames.h"
+
+const uint8_t anim_frames[ANIM_FRAME_COUNT][ANIM_FRAME_SIZE] = {
+    {
+        // frame 0
+    },
+    {
+        // frame 1
+    },
+};
+```
+
+如果你决定只生成 `.h` 文件，也可以，但必须解释原因。
+
+### 8.4 Python 脚本依赖
+
+脚本可以使用 Pillow。
+
+请在文档中写明安装方式：
+
+```powershell
+py -m pip install pillow
+```
+
+---
+
+## 9. Flash 和 RAM 限制说明
+
+请在文档中明确说明容量限制。
+
+128x64 单色 OLED：
+
+```text
+1 帧 = 1024 字节 ≈ 1KB
+10 帧 ≈ 10KB
+20 帧 ≈ 20KB
+30 帧 ≈ 30KB
+60 帧 ≈ 60KB
+```
+
+STM32F103C8T6 资源有限：
+
+```text
+Flash 标称通常是 64KB
+RAM 通常是 20KB
+```
+
+所以初期建议：
+
+```text
+帧数：8~20 帧
+帧率：5~12 FPS
+分辨率：128x64
+颜色：黑白
+```
+
+要求：
+
+```text
+动画数组必须放在 Flash，不要放进 RAM
+不要 malloc
+不要运行时动态加载图片
+不要在 STM32 端解析 GIF
+```
+
+---
+
+## 10. main.c 集成要求
+
+不要破坏我现有的 `main.c` 结构。
+
+如果只是测试 SPI OLED 动画，可以临时这样集成：
+
+```c
+int main(void)
+{
+    delay_init();
+    Timing_Init();
+
+    OLED_Init();
+    App_Anim_Init();
+
+    while (1)
+    {
+        App_Anim_Task();
+    }
+}
+```
+
+如果我的工程里已经有这些任务：
+
+```c
+App_Light_Task();
+App_Temp_Task();
+App_UARTPractice_Task();
+App_UI_Task();
+```
+
+请不要删除它们。
+应该按这种方式加入：
+
+```c
+while (1)
+{
+    App_Light_Task();
+    App_Temp_Task();
+    App_UARTPractice_Task();
+    App_UI_Task();
+    App_Anim_Task();
+}
+```
+
+如果动画全屏播放会和原来的 UI 显示冲突，请说明两种模式：
+
+```text
+模式1：单独动画演示模式，只播放动画
+模式2：正常系统模式，OLED 显示传感器 UI
+```
+
+不要让两个模块同时抢 OLED 刷新，除非你设计了明确的显示管理机制。
+
+---
+
+## 11. 分阶段交付要求
+
+请严格按阶段完成，不要跳步。
+
+### 第一阶段：SPI OLED 点亮
+
+目标：
+
+```text
+完成 SPI2 初始化
+完成 OLED 初始化
+完成 OLED 清屏
+能看到屏幕有反应
+```
+
+交付：
+
+```text
+bsp_spi_oled.c
+bsp_spi_oled.h
+main.c 最小测试示例
+```
+
+请说明：
+
+```text
+修改了哪些文件
+每个文件的作用
+如何接线
+如何编译
+如果屏幕不亮怎么排查
+```
+
+---
+
+### 第二阶段：显示一张测试图片
+
+目标：
+
+```text
+显示一张 128x64 测试图片
+确认取模格式正确
+确认屏幕方向正确
+```
+
+交付：
+
+```text
+OLED_ShowImage128x64()
+一张测试图数组
+```
+
+请检查：
+
+```text
+图片是否上下颠倒
+图片是否左右反了
+是否只有一部分显示
+是否 SH1106 需要列偏移
+```
+
+---
+
+### 第三阶段：两帧图片切换
+
+目标：
+
+```text
+实现 App_Anim_Init()
+实现 App_Anim_Task()
+两张测试图片非阻塞切换
+```
+
+要求：
+
+```text
+使用 Timing_GetTick()
+不使用 delay_ms 阻塞播放
+```
+
+交付：
+
+```text
+app_anim.c
+app_anim.h
+两帧测试数组
+```
+
+---
+
+### 第四阶段：GIF 转换脚本
+
+目标：
+
+```text
+完成 Tools/gif_to_oled_frames.py
+可以把 GIF 转成 anim_frames.c / anim_frames.h
+```
+
+要求：
+
+```text
+支持限制最大帧数
+支持二值化阈值
+支持反色选项
+输出 SSD1306 页格式数组
+```
+
+交付：
+
+```text
+Tools/gif_to_oled_frames.py
+生成的 anim_frames.c
+生成的 anim_frames.h
+```
+
+---
+
+### 第五阶段：真实动画集成
+
+目标：
+
+```text
+把真实 GIF 转换出的数组加入 Keil 工程
+STM32 循环播放动画
+```
+
+要求：
+
+```text
+帧数先控制在 8~20 帧
+帧率先设为 100ms 一帧
+确认 Flash 占用不过大
+```
+
+交付：
+
+```text
+可编译工程
+动画播放效果
+必要的 main.c 集成说明
+```
+
+---
+
+### 第六阶段：文档和排错清单
+
+请新增：
+
+```text
+docs/spi_oled_gif_animation.md
+```
+
+文档必须包含：
+
+```text
+硬件接线表
+SPI OLED 引脚说明
+SSD1306 / SH1106 差异说明
+Keil 工程添加文件方法
+GIF 转换脚本使用方法
+Pillow 安装方法
+main.c 集成方法
+Flash 容量计算
+常见问题排查
+```
+
+---
+
+## 12. 排错清单要求
+
+文档中必须包含排错顺序。
+
+### 12.1 屏幕完全不亮
+
+按顺序检查：
+
+```text
+VCC 是否接 3.3V
+GND 是否共地
+RST 是否接对
+CS 是否接对
+DC 是否接对
+SCK/MOSI 是否接反
+SPI2 时钟是否打开
+GPIOB 时钟是否打开
+OLED 初始化命令是否发送
+```
+
+### 12.2 屏幕亮但不显示
+
+检查：
+
+```text
+DC 命令/数据电平是否反了
+CS 是否一直有效
+SPI 模式是否错误
+初始化命令是否适合 SSD1306
+是否使用了 SH1106 但没有处理列偏移
+```
+
+### 12.3 图像错位
+
+检查：
+
+```text
+取模方向是否正确
+页地址是否正确
+列地址是否正确
+SSD1306 / SH1106 是否有列偏移差异
+```
+
+### 12.4 图像上下反了或左右反了
+
+检查：
+
+```text
+SSD1306 segment remap 命令
+COM scan direction 命令
+Python 转换脚本的像素遍历顺序
+```
+
+### 12.5 动画卡顿
+
+检查：
+
+```text
+是否使用 delay_ms 阻塞
+是否每帧刷新太频繁
+SPI 分频是否太低
+帧数是否过多
+主循环里是否还有其他阻塞任务
+```
+
+### 12.6 编译 Flash 超限
+
+检查：
+
+```text
+GIF 帧数是否过多
+是否没有使用 --max-frames
+是否把数组重复定义在多个文件
+是否把动画数组放进 RAM
+是否启用了太多测试图片
+```
+
+---
+
+## 13. 代码风格要求
+
+必须遵守：
+
+```text
+中文注释详细
+函数命名清晰
+驱动层和应用层分开
+不要把所有逻辑塞进 main.c
+不要删除已有模块
+不要重命名已有函数，除非必须
+不要覆盖原来的 I2C OLED 驱动
+不要引入 RTOS
+不要使用 malloc
+不要使用复杂外部库
+不要使用 printf 做调试输出
+不要直接在 STM32 中解析 GIF
+不要写长时间阻塞 delay
+```
+
+如果需要临时测试代码，请用清楚的注释标记：
+
+```c
+/* SPI OLED 测试代码：确认屏幕能正常显示后可删除 */
+```
+
+---
+
+## 14. 补充约束
+
+每次修改前，请先说明：
+
+```text
+要改哪个文件
+为什么要改
+预计改完后能验证什么
+```
+
+每次修改后，请说明：
+
+```text
+实际修改了哪些文件
+新增了哪些函数
+我需要在 Keil 里添加哪些 .c 文件
+我需要 include 哪些 .h 文件
+我应该怎么编译
+我应该怎么烧录测试
+```
+
+不要做这些事：
+
+```text
+不要删除我已有模块
+不要重命名已有函数
+不要把 SPI OLED、动画播放、GIF 转换脚本混在一起
+不要直接覆盖原来的 oled.c / oled.h
+不要把真实 GIF 的几十帧数组一口气塞进工程
+不要跳过单张图测试直接做完整动画
+不要在没说明的情况下改变原有引脚分配
+```
+
+如果发现工程里已有 I2C OLED 驱动：
+
+```text
+请新建 SPI OLED 驱动
+不要覆盖原来的 I2C OLED 驱动
+必要时在文档里说明两个驱动如何切换
+```
+
+---
+
+## 15. 验收标准
+
+最终工程必须满足：
+
+```text
+1. SPI OLED 能正常初始化
+2. OLED 能清屏
+3. OLED 能显示一张 128x64 黑白图片
+4. OLED 能非阻塞切换两张图片
+5. Python 脚本能把 GIF 转成 C 数组
+6. STM32 能循环播放转换后的多帧动画
+7. 动画播放不使用 delay_ms 阻塞主循环
+8. 工程结构清晰，驱动层和应用层分开
+9. 不破坏原有 I2C OLED 驱动
+10. 不删除原有传感器、UART、UI 等模块
+11. 有完整文档
+12. 有排错清单
+```
+
+---
+
+## 16. 最终交付物
+
+请最终交付：
+
+```text
+1. SPI OLED 驱动代码
+2. 动画播放任务代码
+3. GIF 转 OLED C 数组的 Python 脚本
+4. 示例 anim_frames.h / anim_frames.c
+5. main.c 集成示例
+6. docs/spi_oled_gif_animation.md
+7. 排错清单
+8. Keil 添加文件说明
+9. GIF 转换命令示例
+10. Flash 容量说明
+```

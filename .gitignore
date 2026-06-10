@@ -1,0 +1,8 @@
+Output/
+Project/Listings/
+Project/Objects/
+Project/*.uvguix.*
+Project/*.uvoptx
+*.bak
+__pycache__/
+*.pyc
