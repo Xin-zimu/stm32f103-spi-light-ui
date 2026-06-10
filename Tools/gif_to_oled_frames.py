@@ -126,11 +126,11 @@ def build_header(frame_count: int, interval: int) -> str:
 
 #include "stm32f10x.h"
 
-#define ANIM_FRAME_WIDTH          {WIDTH}U
-#define ANIM_FRAME_HEIGHT         {HEIGHT}U
-#define ANIM_FRAME_SIZE           {FRAME_SIZE}U
-#define ANIM_FRAME_COUNT          {frame_count}U
-#define ANIM_FRAME_INTERVAL_MS    {interval}U
+#define ANIM_FRAME_WIDTH          {WIDTH}U    // 动画帧宽度
+#define ANIM_FRAME_HEIGHT         {HEIGHT}U     // 动画帧高度
+#define ANIM_FRAME_SIZE           {FRAME_SIZE}U   // 每帧页格式字节数
+#define ANIM_FRAME_COUNT          {frame_count}U     // GIF 转换后的动画帧数
+#define ANIM_FRAME_INTERVAL_MS    {interval}U    // 动画帧间隔，单位 ms
 
 extern const uint8_t anim_frames[ANIM_FRAME_COUNT][ANIM_FRAME_SIZE];
 
@@ -143,7 +143,7 @@ def build_source(header_name: str, frames: Sequence[Sequence[int]]) -> str:
     for index, frame in enumerate(frames):
         frame_blocks.append(
             "    {\n"
-            f"        /* Frame {index} */\n"
+            f"        /* 动画帧 {index} */\n"
             f"{format_bytes(frame)}\n"
             "    }"
         )
@@ -163,10 +163,10 @@ def write_outputs(
     output_h = output_c.with_suffix(".h")
     output_c.parent.mkdir(parents=True, exist_ok=True)
     output_h.write_text(
-        build_header(len(frames), interval), encoding="utf-8", newline="\n"
+        build_header(len(frames), interval), encoding="gbk", newline="\n"
     )
     output_c.write_text(
-        build_source(output_h.name, frames), encoding="utf-8", newline="\n"
+        build_source(output_h.name, frames), encoding="gbk", newline="\n"
     )
     return output_c, output_h
 

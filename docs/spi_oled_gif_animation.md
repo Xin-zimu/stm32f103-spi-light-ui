@@ -143,6 +143,24 @@ py Tools/gif_to_oled_frames.py input.gif User/anim_frames.c --max-frames 20 --th
 先备份需要保留的手工测试帧，再用脚本覆盖 `User/anim_frames.c/.h`。重新打开 Keil 后
 Rebuild 即可，不需要在 STM32 端读取 `.gif` 文件。
 
+### 工程内置最终动画
+
+工程已经提供可重复转换的实际 GIF：
+
+```text
+Assets/oled_demo.gif
+```
+
+该文件为 128x64、12 帧、100 ms/帧，画面包含移动方块、轨迹标记和进度条。
+当前 `User/anim_frames.c/.h` 就是执行以下命令生成的最终固件数组：
+
+```powershell
+py Tools/gif_to_oled_frames.py Assets/oled_demo.gif User/anim_frames.c --max-frames 12 --threshold 128 --interval 100
+```
+
+生成结果为 12288 字节动画数据，保存在 Flash 中。转换脚本按工程文本规范输出
+代码页 936、无 BOM 的 C/H 文件，可直接由 Keil ARMCC 5 编译。
+
 ## 9. Flash 与 RAM
 
 | 帧数 | 仅帧数据约占 Flash |
