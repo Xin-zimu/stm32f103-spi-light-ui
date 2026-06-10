@@ -113,6 +113,35 @@ while (1)
 
 ## 8. GIF 转换
 
+### 最简单的使用方法
+
+在工程根目录双击：
+
+```text
+一键更换GIF并烧录.bat
+```
+
+然后只需要选择一个 GIF。工具会自动完成：
+
+```text
+选择 GIF
+→ 取前 20 帧并转换为 128x64 黑白数组
+→ 覆盖 User/anim_frames.c 和 User/anim_frames.h
+→ 调用 Keil 重新编译
+→ 编译成功后调用 Keil 下载到开发板
+```
+
+默认参数为阈值 128、100 ms/帧、最多 20 帧。首次运行如果没有 Pillow，工具会询问
+是否自动安装。烧录前应连接 ST-Link、给开发板供电，并在 Keil 的 Debug 和 Utilities
+页面中选择实际使用的下载器。该下载器设置通常只需在第一次使用时配置。转换或编译
+失败时不会继续烧录。
+
+如果暂时没有连接开发板，烧录步骤会提示失败，但生成的数组和编译出的
+`Output/led.hex` 仍然保留，之后连接 ST-Link 后可再次运行脚本，或在 Keil 中
+点击 Download。
+
+### 命令行使用方法
+
 安装 Pillow：
 
 ```powershell
@@ -178,8 +207,8 @@ STM32F103C8T6 标称通常为 64 KB Flash、20 KB RAM。建议先使用 8 至 20
 ## 10. 编译与烧录测试
 
 1. 按接线表连接 OLED，确认供电为 3.3V 且共地。
-2. 打开 `Project/led.uvprojx`。
-3. 执行 Rebuild，确认 0 Errors，并检查 Flash 使用量。
+2. 最简单方式是双击 `一键更换GIF并烧录.bat` 并选择 GIF。
+3. 手工方式可打开 `Project/led.uvprojx`，执行 Rebuild 并确认 0 Errors。
 4. 用 ST-Link 选择正确的 STM32F103C8 目标并下载。
 5. 复位后观察“清屏、文字、单图、双帧切换”的顺序。
 6. 若方向不对，只调整 `0xA0/0xA1` 和 `0xC0/0xC8`，每次只改一组后验证。
