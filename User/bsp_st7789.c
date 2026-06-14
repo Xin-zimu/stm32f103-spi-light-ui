@@ -388,6 +388,89 @@ void ST7789_FillRect(
 }
 
 /*
+ * 将 4 位索引图片按整数倍放大后写满当前可见区域。
+ *
+ * 每个源数据字节保存两个像素索引，高半字节在前。函数逐源行、逐像素解码，
+ * 并在水平和垂直方向重复 scale 次，直接向 ST7789 发送 RGB565 调色板颜色。
+ * 只有放大后的宽高恰好等于当前屏幕尺寸时才执行，避免错误图片参数造成越界。
+ *
+ * 参数：
+ * image：4 位索引图片数据指针。
+ * palette：16 项 RGB565 调色板指针。
+ * source_width：源图片宽度，必须为偶数。
+ * source_height：源图片高度。
+ * scale：水平和垂直放大倍数。
+ *
+ * 返回值：
+ * 无。
+ *
+ * 副作用：
+ * 覆盖整个 ST7789 可见区域；不申请全屏帧缓冲。
+ */
+void ST7789_ShowIndexed4Image(
+    const uint8_t *image,
+    const uint16_t *palette,
+    uint16_t source_width,
+    uint16_t source_height,
+    uint8_t scale
+)
+{
+    uint16_t source_y;
+    uint8_t repeat_y;
+
+    if ((image == 0) || (palette == 0) || (scale == 0U) ||
+        ((source_width & 1U) != 0U) ||
+        ((uint32_t)source_width * scale != ST7789_WIDTH) ||
+        ((uint32_t)source_height * scale != ST7789_HEIGHT))
+    {
+        return;
+    }
+
+    ST7789_SetAddressWindow(
+        0U,
+        0U,
+        ST7789_WIDTH - 1U,
+        ST7789_HEIGHT - 1U
+    );
+    ST7789_DC_HIGH();
+
+    for (source_y = 0U; source_y < source_height; source_y++)
+    {
+        for (repeat_y = 0U; repeat_y < scale; repeat_y++)
+        {
+            uint16_t source_x;
+
+            for (source_x = 0U; source_x < source_width; source_x++)
+            {
+                uint32_t source_index;
+                uint8_t packed;
+                uint8_t palette_index;
+                uint8_t repeat_x;
+                uint16_t color;
+
+                source_index = (uint32_t)source_y * source_width + source_x;
+                packed = image[source_index >> 1];
+                if ((source_x & 1U) == 0U)
+                {
+                    palette_index = (uint8_t)(packed >> 4);
+                }
+                else
+                {
+                    palette_index = (uint8_t)(packed & 0x0FU);
+                }
+                color = palette[palette_index];
+
+                for (repeat_x = 0U; repeat_x < scale; repeat_x++)
+                {
+                    ST7789_WriteByte((uint8_t)(color >> 8));
+                    ST7789_WriteByte((uint8_t)color);
+                }
+            }
+        }
+    }
+}
+
+/*
  * 初始化 240x240 RGB565 ST7789 屏幕。
  *
  * 流程依次完成 GPIO、SPI2、硬件复位、软件复位、退出睡眠、扫描方向、

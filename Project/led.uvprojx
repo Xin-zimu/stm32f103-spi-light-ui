@@ -465,14 +465,14 @@
               <FilePath>..\User\bsp_st7789.h</FilePath>
             </File>
             <File>
-              <FileName>app_st7789_test.c</FileName>
+              <FileName>anim_frames.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\User\app_st7789_test.c</FilePath>
+              <FilePath>..\User\anim_frames.c</FilePath>
             </File>
             <File>
-              <FileName>app_st7789_test.h</FileName>
+              <FileName>anim_frames.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\User\app_st7789_test.h</FilePath>
+              <FilePath>..\User\anim_frames.h</FilePath>
             </File>
             <File>
               <FileName>fault_handlers.c</FileName>

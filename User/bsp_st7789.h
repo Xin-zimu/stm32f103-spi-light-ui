@@ -51,5 +51,12 @@ void ST7789_FillRect(
     uint16_t height,
     uint16_t color
 );
+void ST7789_ShowIndexed4Image(
+    const uint8_t *image,
+    const uint16_t *palette,
+    uint16_t source_width,
+    uint16_t source_height,
+    uint8_t scale
+);
 
 #endif

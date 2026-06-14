@@ -1,13 +1,13 @@
-#include "app_st7789_test.h"
+#include "anim_frames.h"
 #include "bsp_st7789.h"
 #include "delay.h"
 
 /*
- * 初始化 ST7789 并显示阶段 2 方向和颜色诊断画面。
+ * 初始化 ST7789 并循环显示两张 4 位索引测试图片。
  *
- * 诊断画面使用不对称四角标记、RGB/CMY 色块、中心十字和灰阶块检查
- * 240x240 全屏覆盖、扫描方向、镜像、RGB565 颜色顺序和基本 gamma 表现。
- * 画面只绘制一次，随后保持不变，便于人工观察和逻辑分析仪抓取。
+ * 每张源图片为 120x120、16 色索引格式，驱动在发送时放大 2 倍覆盖
+ * 240x240 屏幕。第一张是暖色斜线和白色数字 1，第二张是冷色棋盘和
+ * 黄色数字 2。阶段 2 使用阻塞延时，下一阶段再改为非阻塞动画调度。
  *
  * 参数：
  * 无。
@@ -16,15 +16,31 @@
  * 主循环不会返回。
  *
  * 副作用：
- * 初始化 SysTick 延时、GPIOB、SPI2 和 ST7789，并覆盖整个可见显存。
+ * 初始化 SysTick 延时、GPIOB、SPI2 和 ST7789，并每秒覆盖一次显存。
  */
 int main(void)
 {
+    uint8_t image_index;
+
     delay_init();
     ST7789_Init();
-    App_ST7789_ShowDiagnosticPattern();
+    image_index = 0U;
 
     while (1)
     {
+        ST7789_ShowIndexed4Image(
+            anim_frames[image_index],
+            anim_palette,
+            ANIM_FRAME_WIDTH,
+            ANIM_FRAME_HEIGHT,
+            ANIM_PIXEL_SCALE
+        );
+        delay_ms(ANIM_FRAME_INTERVAL_MS);
+
+        image_index++;
+        if (image_index >= ANIM_FRAME_COUNT)
+        {
+            image_index = 0U;
+        }
     }
 }
