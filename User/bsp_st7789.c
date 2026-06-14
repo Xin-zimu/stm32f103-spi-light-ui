@@ -326,6 +326,68 @@ void ST7789_Clear(uint16_t color)
 }
 
 /*
+ * 使用单一 RGB565 颜色填充可见区域中的矩形。
+ *
+ * 宽度或高度为 0、起点位于屏幕外时不执行写入。矩形越过右边界或下边界时
+ * 自动裁剪，防止地址窗口超过当前 240x320 可见区域。像素直接流式发送，
+ * 不申请矩形缓冲区。
+ *
+ * 参数：
+ * x：矩形左上角 X 坐标。
+ * y：矩形左上角 Y 坐标。
+ * width：矩形宽度，单位为像素。
+ * height：矩形高度，单位为像素。
+ * color：矩形填充使用的 RGB565 颜色。
+ *
+ * 返回值：
+ * 无。
+ *
+ * 副作用：
+ * 覆盖指定矩形范围内的 ST7789 显存。
+ */
+void ST7789_FillRect(
+    uint16_t x,
+    uint16_t y,
+    uint16_t width,
+    uint16_t height,
+    uint16_t color
+)
+{
+    uint32_t pixel_count;
+
+    if ((width == 0U) || (height == 0U) ||
+        (x >= ST7789_WIDTH) || (y >= ST7789_HEIGHT))
+    {
+        return;
+    }
+
+    if (width > (uint16_t)(ST7789_WIDTH - x))
+    {
+        width = (uint16_t)(ST7789_WIDTH - x);
+    }
+    if (height > (uint16_t)(ST7789_HEIGHT - y))
+    {
+        height = (uint16_t)(ST7789_HEIGHT - y);
+    }
+
+    ST7789_SetAddressWindow(
+        x,
+        y,
+        (uint16_t)(x + width - 1U),
+        (uint16_t)(y + height - 1U)
+    );
+
+    ST7789_DC_HIGH();
+    for (pixel_count = 0U;
+         pixel_count < (uint32_t)width * height;
+         pixel_count++)
+    {
+        ST7789_WriteByte((uint8_t)(color >> 8));
+        ST7789_WriteByte((uint8_t)color);
+    }
+}
+
+/*
  * 初始化 240x320 RGB565 ST7789 屏幕。
  *
  * 流程依次完成 GPIO、SPI2、硬件复位、软件复位、退出睡眠、扫描方向、
