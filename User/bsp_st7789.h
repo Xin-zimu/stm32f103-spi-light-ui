@@ -4,9 +4,9 @@
 #include "stm32f10x.h"
 
 #define ST7789_WIDTH               240U    // 屏幕可见区域宽度
-#define ST7789_HEIGHT              320U    // 屏幕可见区域高度
+#define ST7789_HEIGHT              240U    // 屏幕可见区域高度
 #define ST7789_X_OFFSET            0U      // 可见区域在控制器显存中的 X 偏移
-#define ST7789_Y_OFFSET            0U      // 240x320 面板从显存第 0 行开始
+#define ST7789_Y_OFFSET            0U      // 本面板可见区域从显存第 0 行开始
 #define ST7789_USE_CS              0U      // 七针模块没有 CS 引脚
 #define ST7789_SPI_MODE            3U      // 当前屏幕实测使用 SPI Mode 3
 #define ST7789_MADCTL_VALUE        0x00U   // 默认扫描方向和 RGB 顺序
