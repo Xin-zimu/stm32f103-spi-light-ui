@@ -1,80 +1,52 @@
-#include "stm32f10x.h"
+#include "bsp_st7789.h"
 #include "delay.h"
-#include "timing.h"
 
-#define SPI_OLED_ANIM_DEMO        1U      // 1：SPI 动画；0：原 I2C 光敏界面
-
-#if SPI_OLED_ANIM_DEMO
-#include "app_anim.h"
-#include "bsp_spi_oled.h"
-#else
-#include "led.h"
-#include "light_sensor.h"
-#include "oled.h"
-#endif
+#define COLOR_HOLD_MS             1000U   // 每种测试颜色的显示时间
 
 /*
- * 初始化选定的显示模式，并运行裸机轮询主循环。
+ * 初始化 ST7789 并循环执行阶段 1 纯色点屏测试。
  *
- * SPI_OLED_ANIM_DEMO 用于选择新的全屏 SPI 动画演示；设为 0 时恢复原有
- * 光敏传感器和 I2C OLED 逻辑，避免两个显示模块同时刷新屏幕。
+ * 当前固件只使用 ST7789，不初始化旧 OLED、光敏传感器、交通灯或串口。
+ * 红、绿、蓝、白、黑五种颜色用于检查背光、SPI 通信、RGB565 字节顺序
+ * 和屏幕可见区域偏移。阶段 1 允许使用阻塞延时，后续动画任务再切换为
+ * Timing_GetTick() 驱动的非阻塞调度。
  *
  * 参数：
  * 无。
  *
  * 返回值：
- * 固件主循环不会返回。
+ * 主循环不会返回。
  *
  * 副作用：
- * 初始化定时器以及当前模式使用的外设。
+ * 初始化 SysTick 延时、GPIOB、SPI2 和 ST7789，并持续刷新全屏颜色。
  */
 int main(void)
 {
-#if SPI_OLED_ANIM_DEMO
+    static const uint16_t test_colors[] =
+    {
+        ST7789_RED,
+        ST7789_GREEN,
+        ST7789_BLUE,
+        ST7789_WHITE,
+        ST7789_BLACK
+    };
+    uint8_t color_index;
+
     delay_init();
-    Timing_Init();
-    OLED_SPI_PanelInit();
-    App_Anim_Init();
+    ST7789_Init();
+    color_index = 0U;
 
     while (1)
     {
-        App_Anim_Task();
-    }
-#else
-    uint32_t last_time = 0;
-    uint16_t light_value;
+        ST7789_Clear(test_colors[color_index]);
+        delay_ms(COLOR_HOLD_MS);
 
-    LED_Init();
-    Timing_Init();
-    LightSensor_Init();
-    LightSensor_ADC_Init();
-    OLED_Init();
-
-    OLED_Clear();
-    OLED_ShowString(0, 0, "Light:");
-
-    while (1)
-    {
-        if (Timing_GetTick() - last_time >= 200)
+        color_index++;
+        if (color_index >= (uint8_t)(
+            sizeof(test_colors) / sizeof(test_colors[0])
+        ))
         {
-            last_time = Timing_GetTick();
-
-            light_value = LightSensor_ReadAO();
-
-            OLED_ShowString(4, 0, "     ");
-            OLED_ShowNum(4, 0, light_value, 4);
-
-            if (LightSensor_IsDark())
-            {
-                Traffic_RedOn();
-                OLED_ShowString(2, 0, "Dark  ");
-            }
-            else
-            {
-                Traffic_GreenOn();
-                OLED_ShowString(2, 0, "Bright");
-            }
+            color_index = 0U;
         }
     }
-#endif
 }

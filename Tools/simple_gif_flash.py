@@ -11,8 +11,7 @@ import sys
 from pathlib import Path
 from tkinter import Tk, filedialog, messagebox
 
-MAX_FRAMES = 20
-THRESHOLD = 128
+MAX_FRAMES = 3
 INTERVAL_MS = 100
 TARGET_NAME = "led"
 
@@ -117,8 +116,6 @@ def convert_gif(gif_path: Path) -> int:
             str(OUTPUT_C),
             "--max-frames",
             str(MAX_FRAMES),
-            "--threshold",
-            str(THRESHOLD),
             "--interval",
             str(INTERVAL_MS),
         ],
@@ -222,7 +219,8 @@ def main() -> int:
         messagebox.showinfo(
             "开始处理",
             "将自动完成：GIF 转换 → Keil 编译 → ST-Link 烧录。\n\n"
-            f"最多使用前 {MAX_FRAMES} 帧，播放间隔 {INTERVAL_MS} ms。",
+            f"最多使用前 {MAX_FRAMES} 帧，转换为 16 色并全屏播放，"
+            f"间隔 {INTERVAL_MS} ms。",
         )
         frame_count = convert_gif(Path(gif_name))
         rebuild_project(uv4)

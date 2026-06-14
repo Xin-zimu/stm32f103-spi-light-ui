@@ -1,161 +1,152 @@
-# STM32F103 SPI OLED GIF 动画
+# STM32F103 ST7789 纯色点屏工程
 
-基于 STM32F103C8T6、标准外设库和 Keil5 的 SSD1306 128x64 SPI OLED 动画工程。
+当前工程用于验证一个无 CS 引脚的 7 针 ST7789 240x320 彩屏。
 
-电脑端把 GIF 转换成单色帧数组，STM32 使用 SPI2 从 Flash 读取并非阻塞循环播放。
-工程保留原有 I2C OLED 驱动，不引入 RTOS、动态内存或 STM32 端 GIF 解析。
+现阶段不播放图片或 GIF。上电初始化成功后，屏幕每 1 秒循环显示：
 
-![OLED 动画示例](Assets/oled_demo.gif)
+```text
+红色 -> 绿色 -> 蓝色 -> 白色 -> 黑色
+```
 
-## 主要功能
+只有五种纯色能够稳定显示后，才进入单张图片和动画阶段。
 
-- SPI2 驱动 SSD1306 128x64 单色 OLED。
-- 显示文字、全屏图片和多帧动画。
-- 使用 `Timing_GetTick()` 非阻塞切换动画帧。
-- GIF 自动缩放、二值化并转换为 SSD1306 页格式。
-- 双击选择 GIF，自动转换、Keil 编译并通过 ST-Link 烧录。
-- 保留原有 PB6/PB7 软件 I2C OLED 和光敏传感器界面。
+## 硬件接线
 
-## 硬件
-
-- STM32F103C8T6 最小系统板
-- SSD1306 128x64 四线 SPI OLED
-- ST-Link 下载器
-- 3.3V 电源和连接线
-
-## 接线
-
-| OLED | STM32F103 | 说明 |
+| ST7789 | STM32F103C8T6 | 作用 |
 | --- | --- | --- |
-| SCK / D0 / SCL | PB13 | SPI2 时钟 |
-| MOSI / D1 / SDA | PB15 | SPI2 数据 |
-| CS | PB12 | 片选，低电平有效 |
+| GND | GND | 电源地，必须共地 |
+| VCC | 3.3V | 模块电源 |
+| SCL | PB13 | SPI2 SCK 时钟 |
+| SDA | PB15 | SPI2 MOSI 数据 |
+| RES | PB10 | 硬件复位 |
 | DC | PB14 | 命令/数据选择 |
-| RST / RES | PB10 | OLED 复位 |
-| VCC | 3.3V | 电源 |
-| GND | GND | 共地 |
+| BLK | PB12 | 背光控制，高电平点亮 |
 
-OLED 不需要连接 MISO。
+注意：
 
-## 一键使用
+- `SCL` 和 `SDA` 在该屏幕上是 SPI 信号，不是 I2C。
+- 模块没有 MISO，STM32 只向屏幕发送数据。
+- 模块没有外部 CS 引脚，代码使用 `ST7789_USE_CS=0`，不依赖片选操作。
+- `DC=0` 发送命令，`DC=1` 发送数据。
+- 所有信号和电源均按 3.3V 使用。
 
-1. 安装 Python 3 和 Keil5。
-2. 使用 ST-Link 连接并给开发板供电。
-3. 确认 OLED 按上表接线。
-4. 双击 [一键更换GIF并烧录.bat](一键更换GIF并烧录.bat)。
-5. 在弹窗中选择 GIF。
-6. 等待转换、编译和烧录完成。
+## 当前驱动配置
 
-工具固定使用以下参数：
+驱动配置位于 [User/bsp_st7789.h](User/bsp_st7789.h)：
 
-```text
-最大帧数：20
-画面尺寸：128x64
-二值化阈值：128
-播放间隔：100 ms
+```c
+#define ST7789_WIDTH               240U
+#define ST7789_HEIGHT              320U
+#define ST7789_X_OFFSET            0U
+#define ST7789_Y_OFFSET            0U
+#define ST7789_USE_CS              0U
+#define ST7789_SPI_MODE            3U
 ```
 
-首次运行缺少 Pillow 时，工具会询问是否自动安装。
+当前使用：
 
-## 首次配置
+- STM32F10x 标准外设库。
+- SPI2 主机模式、单线发送、8 位数据、MSB first。
+- SPI2 约 4.5 MHz。
+- 当前屏幕实测使用 SPI Mode 3。
+- RGB565 颜色格式。
+- 240x320 地址窗口，Y 偏移为 0。
+- 初始化期间先关闭背光，复位并清黑屏后再打开背光。
+- 不创建全屏帧缓冲，不使用动态内存。
 
-烧录功能使用 Keil 工程中配置的下载器。首次使用需要打开
-`Project/led.uvprojx`，在以下页面选择实际连接的 ST-Link：
+## SPI Mode 切换
 
-```text
-Options for Target
-├─ Debug
-└─ Utilities
+当前实测配置为 Mode 3：
+
+```c
+#define ST7789_SPI_MODE            3U
 ```
 
-通常只需配置一次。之后双击脚本即可更换 GIF、编译和烧录。
+如果更换屏幕后只有背光、完全没有纯色，可尝试 Mode 0：
 
-如果暂时没有连接 ST-Link，GIF 转换和编译结果仍会保留：
+```c
+#define ST7789_SPI_MODE            0U
+```
+
+修改后必须重新执行 `Rebuild` 和 `Download`。驱动只接受 Mode 0 或 Mode 3，
+其他数值会在编译时报告错误。
+
+## 工程文件
+
+当前 Keil 工程主要编译：
 
 ```text
-User/anim_frames.c
-User/anim_frames.h
+User/main.c
+User/bsp_st7789.c
+User/fault_handlers.c
+SYSTEM/delay/delay.c
+Libraries/src/stm32f10x_gpio.c
+Libraries/src/stm32f10x_rcc.c
+Libraries/src/stm32f10x_spi.c
+```
+
+程序入口是 [User/main.c](User/main.c)，屏幕驱动是
+[User/bsp_st7789.c](User/bsp_st7789.c)。
+
+目录中旧 OLED、GIF 工具、动画数组和实验代码仍然保留，但不参与当前纯色验收流程。
+当前不要运行“一键更换 GIF 并烧录”工具。
+
+## 编译和烧录
+
+使用 [Project/led.uvprojx](Project/led.uvprojx)：
+
+1. 打开 Keil 工程。
+2. 执行 `Rebuild`。
+3. 确认结果为 `0 Error(s), 0 Warning(s)`。
+4. 执行 `Download`。
+5. 复位开发板。
+6. 观察红、绿、蓝、白、黑是否每秒循环。
+
+标准输出文件为：
+
+```text
 Output/led.hex
 ```
 
-连接下载器后可以再次运行脚本，或在 Keil 中点击 Download。
+## 背光亮但没有图像
 
-## 手工转换
+按以下顺序排查：
 
-需要自定义参数时，可使用原始命令行工具：
+1. 确认下载的是当前 `Project/led.uvprojx` 生成的固件。
+2. 确认 SCL 接 PB13、SDA 接 PB15，没有按 I2C 方式接线。
+3. 确认 RES 接 PB10、DC 接 PB14，二者没有接反。
+4. 确认 BLK 接 PB12，且初始化完成后 PB12 为高电平。
+5. 测量 PB10，启动时应出现低电平复位脉冲。
+6. 测量 PB13，刷屏时应出现 SPI 时钟。
+7. 测量 PB15，刷屏时应出现数据变化。
+8. 确认 PB14 在命令和数据发送期间会切换电平。
+9. 在 Mode 3 和 Mode 0 之间切换后重新编译烧录。
+10. 如果信号均正常，确认模块控制器确实是 ST7789，且内部 CS 已固定为有效状态。
 
-```powershell
-py -m pip install pillow
-py Tools/gif_to_oled_frames.py input.gif User/anim_frames.c --max-frames 20 --threshold 128 --interval 100
-```
+背光亮只说明 VCC、GND 和 BLK 基本正常，不代表 ST7789 已经初始化成功。
 
-可加 `--invert` 反转黑白颜色。
+## 图像偏移或颜色异常
 
-转换后 `anim_frames.c/.h` 已经在 Keil 工程中，不需要重新添加文件，只需 Rebuild
-并 Download。
-
-## 工程结构
-
-```text
-User/
-  bsp_spi_oled.c/.h       SPI2 和 SSD1306 驱动
-  app_anim.c/.h           非阻塞动画任务
-  anim_frames.c/.h        GIF 转换后的帧数组
-Tools/
-  simple_gif_flash.py     一键弹窗工具
-  gif_to_oled_frames.py   GIF 转换核心脚本
-Assets/
-  oled_demo.gif           12 帧示例动画
-Project/
-  led.uvprojx             Keil5 工程
-docs/
-  spi_oled_gif_animation.md
-```
-
-## 容量
-
-每帧固定占用：
-
-```text
-128 × 64 ÷ 8 = 1024 字节
-```
-
-20 帧约占 20 KB Flash。STM32F103C8T6 标称通常为 64 KB Flash、20 KB RAM。
-动画数组带 `const`，直接保存在 Flash，不会占用等量 RAM。
-
-## 显示模式
-
-`User/main.c` 中：
+纯色出现但位置不正确时，调整：
 
 ```c
-#define SPI_OLED_ANIM_DEMO 1U
+#define ST7789_X_OFFSET            0U
+#define ST7789_Y_OFFSET            0U
 ```
 
-- `1U`：SPI OLED 动画模式。
-- `0U`：恢复原有光敏传感器和 I2C OLED 界面。
+本次 240x320 面板使用 Y 偏移 0。常见 240x240 模块可能使用 Y 偏移 0 或 80。
+颜色红蓝互换时，需要继续检查
+`ST7789_MADCTL_VALUE` 的 RGB/BGR 配置，但在纯色完全不显示时不要先改颜色方向。
 
-## 常见问题
+完整排障方法见
+[ST7789 与逻辑分析仪排障学习指南](docs/st7789-logic-analyzer-troubleshooting-guide.md)。
 
-### 屏幕不亮
+## 后续计划
 
-依次检查 3.3V、共地、RST、CS、DC、SCK、MOSI，并确认模块实际为四线 SPI。
+1. 完成红、绿、蓝、白、黑纯色验收。
+2. 显示一张 RGB565 测试图片，检查方向、颜色和偏移。
+3. 实现两帧图片切换。
+4. 恢复非阻塞动画任务。
+5. 最后再接入 GIF 转换数据。
 
-### 图像左右错位
-
-模块可能是 SH1106，需要在列地址中增加约 2 列偏移。当前工程默认按 SSD1306 实现。
-
-### 烧录失败
-
-检查开发板供电、ST-Link 的 SWDIO/SWCLK/GND 接线，以及 Keil Debug 和 Utilities
-页面中的下载器设置。
-
-### Flash 超限
-
-减少 GIF 帧数。推荐 8 至 20 帧、5 至 12 FPS。
-
-## 详细文档
-
-完整接口说明、SSD1306/SH1106 差异和排错顺序见：
-
-[docs/spi_oled_gif_animation.md](docs/spi_oled_gif_animation.md)
-
+当前阶段的验收标准只有一个：五种纯色能够稳定循环显示。
