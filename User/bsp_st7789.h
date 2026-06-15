@@ -58,5 +58,13 @@ void ST7789_ShowIndexed4Image(
     uint16_t source_height,
     uint8_t scale
 );
+void ST7789_ApplyIndexed4Delta(
+    const uint8_t *delta,
+    uint32_t delta_size,
+    const uint16_t *palette,
+    uint16_t source_width,
+    uint16_t source_height,
+    uint8_t scale
+);
 
 #endif

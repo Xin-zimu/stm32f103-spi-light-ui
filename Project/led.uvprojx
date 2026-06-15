@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>STM32F10X_MD,USE_STDPERIPH_DRIVER</Define>
               <Undefine></Undefine>
-              <IncludePath>..\Libraries\CMSIS;..\Libraries\inc;..\User;..\SYSTEM\delay;..\SYSTEM\sys</IncludePath>
+              <IncludePath>..\Libraries\CMSIS;..\Libraries\inc;..\User;..\SYSTEM\delay;..\SYSTEM\sys;..\SYSTEM\timing</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -435,6 +435,11 @@
               <FilePath>..\Libraries\src\stm32f10x_spi.c</FilePath>
             </File>
             <File>
+              <FileName>stm32f10x_tim.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Libraries\src\stm32f10x_tim.c</FilePath>
+            </File>
+            <File>
               <FileName>misc.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Libraries\src\misc.c</FilePath>
@@ -475,6 +480,16 @@
               <FilePath>..\User\anim_frames.h</FilePath>
             </File>
             <File>
+              <FileName>app_st7789_anim.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\app_st7789_anim.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_st7789_anim.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\app_st7789_anim.h</FilePath>
+            </File>
+            <File>
               <FileName>fault_handlers.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\fault_handlers.c</FilePath>
@@ -498,6 +513,16 @@
               <FileName>sys.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\SYSTEM\sys\sys.h</FilePath>
+            </File>
+            <File>
+              <FileName>timing.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\SYSTEM\timing\timing.c</FilePath>
+            </File>
+            <File>
+              <FileName>timing.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\SYSTEM\timing\timing.h</FilePath>
             </File>
           </Files>
         </Group>

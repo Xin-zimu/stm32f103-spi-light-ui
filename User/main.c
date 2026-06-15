@@ -1,46 +1,34 @@
-#include "anim_frames.h"
+#include "app_st7789_anim.h"
 #include "bsp_st7789.h"
 #include "delay.h"
+#include "timing.h"
 
 /*
- * 初始化 ST7789 并循环显示两张 4 位索引测试图片。
+ * Initialize the ST7789 and continuously service non-blocking GIF playback.
  *
- * 每张源图片为 120x120、16 色索引格式，驱动在发送时放大 2 倍覆盖
- * 240x240 屏幕。第一张是暖色斜线和白色数字 1，第二张是冷色棋盘和
- * 黄色数字 2。阶段 2 使用阻塞延时，下一阶段再改为非阻塞动画调度。
+ * SysTick remains dedicated to the display driver's startup delays, while
+ * TIM3 supplies the millisecond scheduler used between animation frames.
+ * Each SPI frame update is synchronous, but the main loop never waits in a
+ * frame-delay call and can later host additional cooperative tasks.
  *
- * 参数：
- * 无。
+ * Parameters:
+ * None.
  *
- * 返回值：
- * 主循环不会返回。
+ * Return value:
+ * The firmware main loop does not return.
  *
- * 副作用：
- * 初始化 SysTick 延时、GPIOB、SPI2 和 ST7789，并每秒覆盖一次显存。
+ * Side effects:
+ * Configures timing hardware, SPI2, GPIOB, and the ST7789 display.
  */
 int main(void)
 {
-    uint8_t image_index;
-
     delay_init();
+    Timing_Init();
     ST7789_Init();
-    image_index = 0U;
+    App_ST7789_AnimInit();
 
     while (1)
     {
-        ST7789_ShowIndexed4Image(
-            anim_frames[image_index],
-            anim_palette,
-            ANIM_FRAME_WIDTH,
-            ANIM_FRAME_HEIGHT,
-            ANIM_PIXEL_SCALE
-        );
-        delay_ms(ANIM_FRAME_INTERVAL_MS);
-
-        image_index++;
-        if (image_index >= ANIM_FRAME_COUNT)
-        {
-            image_index = 0U;
-        }
+        App_ST7789_AnimTask();
     }
 }

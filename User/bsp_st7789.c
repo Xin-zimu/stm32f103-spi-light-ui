@@ -471,6 +471,125 @@ void ST7789_ShowIndexed4Image(
 }
 
 /*
+ * 将一帧 4 位索引差分数据应用到 ST7789 当前显存。
+ *
+ * 数据按源图每一行分别编码。控制字节最高位为 1 时跳过未变化像素，
+ * 最高位为 0 时后随打包的 4 位调色板索引并绘制变化像素；低 7 位加 1
+ * 表示本段源像素数。每个绘制段单独设置窗口并放大，未变化区域继续保留
+ * 屏幕上一帧内容，因此不需要在 STM32 的 RAM 中保存完整帧缓冲。
+ *
+ * 参数：
+ * delta：当前帧的行式差分数据。
+ * delta_size：差分数据字节数，用于防止读取越界。
+ * palette：16 色 RGB565 调色板。
+ * source_width：差分数据的源图宽度。
+ * source_height：差分数据的源图高度。
+ * scale：源像素在水平和垂直方向的整数放大倍数。
+ *
+ * 返回值：
+ * 无。参数或数据不合法时立即停止当前帧更新。
+ *
+ * 副作用：
+ * 仅改写差分数据标记为变化的 ST7789 显存区域；不分配完整帧缓冲。
+ */
+void ST7789_ApplyIndexed4Delta(
+    const uint8_t *delta,
+    uint32_t delta_size,
+    const uint16_t *palette,
+    uint16_t source_width,
+    uint16_t source_height,
+    uint8_t scale
+)
+{
+    uint32_t position;
+    uint16_t source_y;
+
+    if ((delta == 0) || (palette == 0) || (scale == 0U) ||
+        ((uint32_t)source_width * scale != ST7789_WIDTH) ||
+        ((uint32_t)source_height * scale != ST7789_HEIGHT))
+    {
+        return;
+    }
+
+    position = 0U;
+    for (source_y = 0U; source_y < source_height; source_y++)
+    {
+        uint16_t source_x;
+
+        source_x = 0U;
+        while (source_x < source_width)
+        {
+            uint8_t control;
+            uint16_t run_length;
+
+            if (position >= delta_size)
+            {
+                return;
+            }
+
+            control = delta[position++];
+            run_length = (uint16_t)((control & 0x7FU) + 1U);
+            if (run_length > (uint16_t)(source_width - source_x))
+            {
+                return;
+            }
+
+            if ((control & 0x80U) == 0U)
+            {
+                uint32_t payload_size;
+                uint8_t repeat_y;
+
+                payload_size = (run_length + 1U) >> 1;
+                if ((position + payload_size) > delta_size)
+                {
+                    return;
+                }
+
+                ST7789_SetAddressWindow(
+                    (uint16_t)(source_x * scale),
+                    (uint16_t)(source_y * scale),
+                    (uint16_t)((source_x + run_length) * scale - 1U),
+                    (uint16_t)((source_y + 1U) * scale - 1U)
+                );
+                ST7789_DC_HIGH();
+
+                for (repeat_y = 0U; repeat_y < scale; repeat_y++)
+                {
+                    uint16_t run_x;
+
+                    for (run_x = 0U; run_x < run_length; run_x++)
+                    {
+                        uint8_t packed;
+                        uint8_t palette_index;
+                        uint8_t repeat_x;
+                        uint16_t color;
+
+                        packed = delta[position + (run_x >> 1)];
+                        if ((run_x & 1U) == 0U)
+                        {
+                            palette_index = (uint8_t)(packed >> 4);
+                        }
+                        else
+                        {
+                            palette_index = (uint8_t)(packed & 0x0FU);
+                        }
+                        color = palette[palette_index];
+
+                        for (repeat_x = 0U; repeat_x < scale; repeat_x++)
+                        {
+                            ST7789_WriteByte((uint8_t)(color >> 8));
+                            ST7789_WriteByte((uint8_t)color);
+                        }
+                    }
+                }
+                position += payload_size;
+            }
+            source_x = (uint16_t)(source_x + run_length);
+        }
+    }
+}
+
+/*
  * 初始化 240x240 RGB565 ST7789 屏幕。
  *
  * 流程依次完成 GPIO、SPI2、硬件复位、软件复位、退出睡眠、扫描方向、

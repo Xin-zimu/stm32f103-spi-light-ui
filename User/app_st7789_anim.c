@@ -7,11 +7,11 @@ static uint32_t g_anim_last_tick = 0U;
 static uint8_t g_anim_frame_index = 0U;
 
 /*
- * Initialize the ST7789 animation playback state.
+ * Initialize the ST7789 GIF playback state and draw the complete first frame.
  *
- * The first indexed frame is expanded from 120x120 to 240x240 immediately.
- * Frame data and the RGB565 palette remain in Flash; no frame buffer or
- * dynamic memory is used.
+ * The first frame is stored as a normal packed four-bit indexed image because
+ * it establishes every display pixel. Later frames retain unchanged pixels in
+ * the controller RAM and apply only their encoded differences.
  *
  * Parameters:
  * None.
@@ -20,12 +20,12 @@ static uint8_t g_anim_frame_index = 0U;
  * None.
  *
  * Side effects:
- * Writes the first frame to the ST7789 and resets animation timing.
+ * Replaces the full ST7789 image and resets the frame scheduler.
  */
 void App_ST7789_AnimInit(void)
 {
     ST7789_ShowIndexed4Image(
-        anim_frames[0],
+        anim_first_frame,
         anim_palette,
         ANIM_FRAME_WIDTH,
         ANIM_FRAME_HEIGHT,
@@ -37,11 +37,12 @@ void App_ST7789_AnimInit(void)
 }
 
 /*
- * Advance the ST7789 animation when the configured frame interval expires.
+ * Advance GIF playback after the non-blocking frame interval expires.
  *
- * Unsigned tick subtraction remains valid across the system tick wraparound.
- * A full frame transfer is synchronous, while the interval wait itself is
- * non-blocking so other main-loop tasks may run between refreshes.
+ * Frames 1 through N use offsets into the shared delta stream. When playback
+ * wraps, frame zero is drawn completely so the next loop never depends on
+ * stale controller RAM. The timestamp is recorded after the synchronous SPI
+ * transfer, giving every completed frame its configured visible hold time.
  *
  * Parameters:
  * None.
@@ -50,7 +51,7 @@ void App_ST7789_AnimInit(void)
  * None.
  *
  * Side effects:
- * Streams one indexed frame to the ST7789 when it becomes due.
+ * Updates the ST7789 when one animation frame becomes due.
  */
 void App_ST7789_AnimTask(void)
 {
@@ -62,15 +63,34 @@ void App_ST7789_AnimTask(void)
         return;
     }
 
-    ST7789_ShowIndexed4Image(
-        anim_frames[g_anim_frame_index],
-        anim_palette,
-        ANIM_FRAME_WIDTH,
-        ANIM_FRAME_HEIGHT,
-        ANIM_PIXEL_SCALE
-    );
+    if (g_anim_frame_index == 0U)
+    {
+        ST7789_ShowIndexed4Image(
+            anim_first_frame,
+            anim_palette,
+            ANIM_FRAME_WIDTH,
+            ANIM_FRAME_HEIGHT,
+            ANIM_PIXEL_SCALE
+        );
+    }
+    else
+    {
+        uint32_t delta_start;
+        uint32_t delta_end;
 
-    g_anim_last_tick = now;
+        delta_start = anim_delta_offsets[g_anim_frame_index - 1U];
+        delta_end = anim_delta_offsets[g_anim_frame_index];
+        ST7789_ApplyIndexed4Delta(
+            &anim_delta_data[delta_start],
+            delta_end - delta_start,
+            anim_palette,
+            ANIM_FRAME_WIDTH,
+            ANIM_FRAME_HEIGHT,
+            ANIM_PIXEL_SCALE
+        );
+    }
+
+    g_anim_last_tick = Timing_GetTick();
     g_anim_frame_index++;
     if (g_anim_frame_index >= ANIM_FRAME_COUNT)
     {
