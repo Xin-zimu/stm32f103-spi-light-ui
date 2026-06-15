@@ -13,13 +13,13 @@ WIDTH = 120
 HEIGHT = 120
 PIXEL_SCALE = 2
 PALETTE_SIZE = 16
-FRAME_COUNT = 9
-FRAME_INTERVAL_MS = 125
+FRAME_COUNT = 28
+FRAME_INTERVAL_MS = 40
 FIRST_FRAME_SIZE = WIDTH * HEIGHT // 2
 
 
 def load_frames(path: Path) -> list[Image.Image]:
-    """Load composited GIF frames and retain nine evenly spaced frames."""
+    """Load composited GIF frames and retain the configured evenly spaced frames."""
     image = Image.open(path)
     if image.size != (WIDTH, HEIGHT):
         raise ValueError(f"expected {WIDTH}x{HEIGHT}, got {image.size}")
