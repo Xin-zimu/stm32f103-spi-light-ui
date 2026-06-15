@@ -9,6 +9,7 @@
 #define ST7789_Y_OFFSET            0U      // 本面板可见区域从显存第 0 行开始
 #define ST7789_USE_CS              0U      // 七针模块没有 CS 引脚
 #define ST7789_SPI_MODE            3U      // 当前屏幕实测使用 SPI Mode 3
+#define ST7789_SPI_PRESCALER       SPI_BaudRatePrescaler_2 // SPI2约18 MHz
 #define ST7789_MADCTL_VALUE        0x00U   // 默认扫描方向和 RGB 顺序
 
 #define ST7789_BLACK               0x0000U // RGB565 黑色

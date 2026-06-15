@@ -13,21 +13,25 @@ WIDTH = 120
 HEIGHT = 120
 PIXEL_SCALE = 2
 PALETTE_SIZE = 16
-FRAME_STEP = 3
-FRAME_INTERVAL_MS = 120
+FRAME_COUNT = 9
+FRAME_INTERVAL_MS = 125
 FIRST_FRAME_SIZE = WIDTH * HEIGHT // 2
 
 
 def load_frames(path: Path) -> list[Image.Image]:
-    """Load composited GIF frames and keep every third 40 ms frame."""
+    """Load composited GIF frames and retain nine evenly spaced frames."""
     image = Image.open(path)
     if image.size != (WIDTH, HEIGHT):
         raise ValueError(f"expected {WIDTH}x{HEIGHT}, got {image.size}")
     if image.n_frames < 2:
         raise ValueError("the GIF must contain at least two frames")
 
+    indexes = [
+        round(index * (image.n_frames - 1) / (FRAME_COUNT - 1))
+        for index in range(FRAME_COUNT)
+    ]
     frames = []
-    for index in range(0, image.n_frames, FRAME_STEP):
+    for index in indexes:
         image.seek(index)
         frames.append(image.convert("RGB").copy())
     return frames
@@ -78,24 +82,26 @@ def pack_indexes(indexes: Sequence[int]) -> list[int]:
 
 
 def encode_delta(current: Sequence[int], previous: Sequence[int]) -> list[int]:
-    """Encode one frame as row-local skip and literal runs."""
+    """Encode one frame as row-local runs, bridging one-pixel unchanged gaps."""
     encoded: list[int] = []
     for row in range(HEIGHT):
         row_start = row * WIDTH
+        changed = [
+            current[row_start + column] != previous[row_start + column]
+            for column in range(WIDTH)
+        ]
+        for column in range(1, WIDTH - 1):
+            if not changed[column] and changed[column - 1] and changed[column + 1]:
+                changed[column] = True
+
         column = 0
         while column < WIDTH:
-            unchanged = (
-                current[row_start + column] == previous[row_start + column]
-            )
+            unchanged = not changed[column]
             count = 1
             while (
                 column + count < WIDTH
                 and count < 128
-                and (
-                    current[row_start + column + count]
-                    == previous[row_start + column + count]
-                )
-                == unchanged
+                and (not changed[column + count]) == unchanged
             ):
                 count += 1
 
@@ -185,12 +191,12 @@ def build_header(frame_count: int, delta_size: int, source_hash: str) -> str:
 #define ANIM_FRAME_COUNT          {frame_count}U     // Number of retained GIF frames
 #define ANIM_FRAME_INTERVAL_MS    {FRAME_INTERVAL_MS}U     // Display time per retained frame
 #define ANIM_FIRST_FRAME_SIZE     {FIRST_FRAME_SIZE}U   // Packed first-frame bytes
-#define ANIM_DELTA_DATA_SIZE      {delta_size}U  // Encoded bytes for frames 1..N
+#define ANIM_DELTA_DATA_SIZE      {delta_size}U  // Encoded bytes for all transitions
 #define ANIM_SOURCE_SHA256        "{source_hash}"
 
 extern const uint16_t anim_palette[16];
 extern const uint8_t anim_first_frame[ANIM_FIRST_FRAME_SIZE];
-extern const uint32_t anim_delta_offsets[ANIM_FRAME_COUNT];
+extern const uint32_t anim_delta_offsets[ANIM_FRAME_COUNT + 1U];
 extern const uint8_t anim_delta_data[ANIM_DELTA_DATA_SIZE];
 
 #endif
@@ -216,7 +222,7 @@ const uint8_t anim_first_frame[ANIM_FIRST_FRAME_SIZE] =
 {format_bytes(first_frame)}
 }};
 
-const uint32_t anim_delta_offsets[ANIM_FRAME_COUNT] =
+const uint32_t anim_delta_offsets[ANIM_FRAME_COUNT + 1U] =
 {{
 {format_dwords(offsets)}
 }};
@@ -241,10 +247,11 @@ def main() -> int:
 
     offsets = [0]
     delta_data: list[int] = []
-    for frame_index in range(1, len(indexes)):
-        encoded = encode_delta(indexes[frame_index], indexes[frame_index - 1])
-        if apply_delta(encoded, indexes[frame_index - 1]) != indexes[frame_index]:
-            raise ValueError(f"delta round-trip failed for frame {frame_index}")
+    for frame_index in range(len(indexes)):
+        next_index = (frame_index + 1) % len(indexes)
+        encoded = encode_delta(indexes[next_index], indexes[frame_index])
+        if apply_delta(encoded, indexes[frame_index]) != indexes[next_index]:
+            raise ValueError(f"delta round-trip failed after frame {frame_index}")
         delta_data.extend(encoded)
         offsets.append(len(delta_data))
 

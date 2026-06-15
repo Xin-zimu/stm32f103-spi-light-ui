@@ -4,14 +4,15 @@
 #include "timing.h"
 
 static uint32_t g_anim_last_tick = 0U;
-static uint8_t g_anim_frame_index = 0U;
+static uint8_t g_anim_transition_index = 0U;
 
 /*
  * Initialize the ST7789 GIF playback state and draw the complete first frame.
  *
  * The first frame is stored as a normal packed four-bit indexed image because
- * it establishes every display pixel. Later frames retain unchanged pixels in
- * the controller RAM and apply only their encoded differences.
+ * it establishes every display pixel. Every later transition, including the
+ * last frame back to the first, retains unchanged controller RAM pixels and
+ * applies only its encoded differences.
  *
  * Parameters:
  * None.
@@ -33,16 +34,17 @@ void App_ST7789_AnimInit(void)
     );
 
     g_anim_last_tick = Timing_GetTick();
-    g_anim_frame_index = (ANIM_FRAME_COUNT > 1U) ? 1U : 0U;
+    g_anim_transition_index = 0U;
 }
 
 /*
  * Advance GIF playback after the non-blocking frame interval expires.
  *
- * Frames 1 through N use offsets into the shared delta stream. When playback
- * wraps, frame zero is drawn completely so the next loop never depends on
- * stale controller RAM. The timestamp is recorded after the synchronous SPI
- * transfer, giving every completed frame its configured visible hold time.
+ * Each offset pair describes one transition: frame 0 to 1 through the final
+ * frame back to frame 0. The loop boundary therefore costs roughly the same
+ * as every other update instead of sending a complete 240x240 frame.
+ * Advancing the deadline by a fixed interval keeps frame start times uniform;
+ * the measured 7 to 12 ms transfer cost does not extend every frame period.
  *
  * Parameters:
  * None.
@@ -63,23 +65,12 @@ void App_ST7789_AnimTask(void)
         return;
     }
 
-    if (g_anim_frame_index == 0U)
-    {
-        ST7789_ShowIndexed4Image(
-            anim_first_frame,
-            anim_palette,
-            ANIM_FRAME_WIDTH,
-            ANIM_FRAME_HEIGHT,
-            ANIM_PIXEL_SCALE
-        );
-    }
-    else
     {
         uint32_t delta_start;
         uint32_t delta_end;
 
-        delta_start = anim_delta_offsets[g_anim_frame_index - 1U];
-        delta_end = anim_delta_offsets[g_anim_frame_index];
+        delta_start = anim_delta_offsets[g_anim_transition_index];
+        delta_end = anim_delta_offsets[g_anim_transition_index + 1U];
         ST7789_ApplyIndexed4Delta(
             &anim_delta_data[delta_start],
             delta_end - delta_start,
@@ -90,10 +81,10 @@ void App_ST7789_AnimTask(void)
         );
     }
 
-    g_anim_last_tick = Timing_GetTick();
-    g_anim_frame_index++;
-    if (g_anim_frame_index >= ANIM_FRAME_COUNT)
+    g_anim_last_tick += ANIM_FRAME_INTERVAL_MS;
+    g_anim_transition_index++;
+    if (g_anim_transition_index >= ANIM_FRAME_COUNT)
     {
-        g_anim_frame_index = 0U;
+        g_anim_transition_index = 0U;
     }
 }

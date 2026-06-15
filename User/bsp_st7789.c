@@ -60,7 +60,8 @@ void ST7789_GPIO_Init(void)
  *
  * SPI2 配置为主机、8 位、MSB 先发送、软件 NSS 和单线发送。时钟极性
  * 与采样边沿由 ST7789_SPI_MODE 选择，当前实测使用 Mode 3；若更换屏幕
- * 模块，可改为 Mode 0 复测。APB1 为 36 MHz 时，8 分频得到约 4.5 MHz 时钟。
+ * 模块，可改为 Mode 0 复测。APB1 为 36 MHz 时，2 分频得到约 18 MHz 时钟，
+ * 用于把帧差写入时间压缩到单次屏幕扫描周期附近。
  *
  * 参数：
  * 无。
@@ -91,13 +92,60 @@ void ST7789_SPI_Init(void)
 #error "ST7789_SPI_MODE must be 0 or 3"
 #endif
     spi.SPI_NSS = SPI_NSS_Soft;
-    spi.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_8;
+    spi.SPI_BaudRatePrescaler = ST7789_SPI_PRESCALER;
     spi.SPI_FirstBit = SPI_FirstBit_MSB;
     spi.SPI_CRCPolynomial = 7U;
 
     SPI_Init(SPI2, &spi);
     SPI_NSSInternalSoftwareConfig(SPI2, SPI_NSSInternalSoft_Set);
     SPI_Cmd(SPI2, ENABLE);
+}
+
+/*
+ * 将一个字节加入连续 SPI 像素数据流。
+ *
+ * 这里只等待发送寄存器可写，不等待移位寄存器完成。连续像素可以紧密进入
+ * SPI2，避免每个字节之间产生空闲时钟；调用者在切换 DC 或发送新命令前
+ * 必须执行 ST7789_WaitStreamComplete()。
+ *
+ * 参数：
+ * data：需要发送的 8 位像素数据。
+ *
+ * 返回值：
+ * 无。
+ *
+ * 副作用：
+ * 向 SPI2 数据寄存器写入一个字节，返回时最后一个字节可能仍在移位发送。
+ */
+static void ST7789_WriteStreamByte(uint8_t data)
+{
+    while (SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_TXE) == RESET)
+    {
+    }
+
+    SPI_I2S_SendData(SPI2, data);
+}
+
+/*
+ * 等待连续 SPI 数据流的最后一个字节发送完成。
+ *
+ * 该同步点只放在一段连续像素之后，而不是每个字节之后。完成后才能改变 DC
+ * 电平或重新设置地址窗口，防止最后一个像素被控制器解释为命令。
+ *
+ * 参数：
+ * 无。
+ *
+ * 返回值：
+ * 无。
+ *
+ * 副作用：
+ * 阻塞到 SPI2 的 BSY 标志清零。
+ */
+static void ST7789_WaitStreamComplete(void)
+{
+    while (SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_BSY) == SET)
+    {
+    }
 }
 
 /*
@@ -117,15 +165,8 @@ void ST7789_SPI_Init(void)
  */
 void ST7789_WriteByte(uint8_t data)
 {
-    while (SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_TXE) == RESET)
-    {
-    }
-
-    SPI_I2S_SendData(SPI2, data);
-
-    while (SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_BSY) == SET)
-    {
-    }
+    ST7789_WriteStreamByte(data);
+    ST7789_WaitStreamComplete();
 }
 
 /*
@@ -320,9 +361,10 @@ void ST7789_Clear(uint16_t color)
          pixel_count < (uint32_t)ST7789_WIDTH * ST7789_HEIGHT;
          pixel_count++)
     {
-        ST7789_WriteByte((uint8_t)(color >> 8));
-        ST7789_WriteByte((uint8_t)color);
+        ST7789_WriteStreamByte((uint8_t)(color >> 8));
+        ST7789_WriteStreamByte((uint8_t)color);
     }
+    ST7789_WaitStreamComplete();
 }
 
 /*
@@ -382,9 +424,10 @@ void ST7789_FillRect(
          pixel_count < (uint32_t)width * height;
          pixel_count++)
     {
-        ST7789_WriteByte((uint8_t)(color >> 8));
-        ST7789_WriteByte((uint8_t)color);
+        ST7789_WriteStreamByte((uint8_t)(color >> 8));
+        ST7789_WriteStreamByte((uint8_t)color);
     }
+    ST7789_WaitStreamComplete();
 }
 
 /*
@@ -462,12 +505,13 @@ void ST7789_ShowIndexed4Image(
 
                 for (repeat_x = 0U; repeat_x < scale; repeat_x++)
                 {
-                    ST7789_WriteByte((uint8_t)(color >> 8));
-                    ST7789_WriteByte((uint8_t)color);
+                    ST7789_WriteStreamByte((uint8_t)(color >> 8));
+                    ST7789_WriteStreamByte((uint8_t)color);
                 }
             }
         }
     }
+    ST7789_WaitStreamComplete();
 }
 
 /*
@@ -577,11 +621,12 @@ void ST7789_ApplyIndexed4Delta(
 
                         for (repeat_x = 0U; repeat_x < scale; repeat_x++)
                         {
-                            ST7789_WriteByte((uint8_t)(color >> 8));
-                            ST7789_WriteByte((uint8_t)color);
+                            ST7789_WriteStreamByte((uint8_t)(color >> 8));
+                            ST7789_WriteStreamByte((uint8_t)color);
                         }
                     }
                 }
+                ST7789_WaitStreamComplete();
                 position += payload_size;
             }
             source_x = (uint16_t)(source_x + run_length);
