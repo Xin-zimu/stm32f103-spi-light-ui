@@ -170,6 +170,9 @@ Output/led.hex
 完整排障方法见
 [ST7789 与逻辑分析仪排障学习指南](docs/st7789-logic-analyzer-troubleshooting-guide.md)。
 
+如果要学习 GIF 差分刷新、短空洞合并和 DMA 段统计的优化方法，见
+[ST7789 差分刷新优化学习笔记](docs/st7789-delta-optimization-learning.md)。
+
 当前阶段验收标准：
 
 1. 上电后显示真实小猫动画。

@@ -117,3 +117,6 @@ SPI2 TX DMA -> DMA1 Channel5
 
 详细的 PulseView 使用方法和历史故障复盘见
 [ST7789 与逻辑分析仪排障学习指南](st7789-logic-analyzer-troubleshooting-guide.md)。
+
+差分刷新、短空洞合并和统计指标的学习说明见
+[ST7789 差分刷新优化学习笔记](st7789-delta-optimization-learning.md)。
