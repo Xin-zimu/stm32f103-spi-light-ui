@@ -32,33 +32,32 @@ void _sys_exit(int x)
 #endif
 //重定义fputc函数 
 /*
- * Send one byte through USART1 for stdio retargeting.
+ * Queue one byte through USART1 for stdio retargeting.
  *
- * This keeps the legacy blocking printf path available while the new DMA
- * transmit API is idle. If a DMA transfer is active, the byte write waits
- * until the DMA path and USART shift register have finished to avoid mixing
- * blocking and DMA transmit data.
+ * printf writes one character at a time. The byte is copied into the USART1
+ * transmit ring buffer and DMA1 Channel4 is started when the transmitter is
+ * idle. If the ring is full, this compatibility path waits until the DMA
+ * interrupt frees space so printf keeps its blocking stream semantics.
  *
  * Parameters:
  * ch: Character byte to transmit.
  * f: C library stream pointer, unused by this retarget.
  *
  * Return value:
- * The transmitted character value.
+ * The queued character value.
  *
  * Side effects:
- * Blocks until USART1 can accept and finish the byte.
+ * May block while the TX ring buffer is full.
  */
 int fputc(int ch, FILE *f)
 {
+    u8 byte;
+
     (void)f;
-    while (USART1_DMA_IsBusy() != 0)
+    byte = (u8)ch;
+    while (USART1_DMA_Send(&byte, 1U) == 0U)
     {
     }
-    while ((USART1->SR & 0X40) == 0)
-    {
-    }
-    USART1->DR = (u8)ch;
     return ch;
 }
 #endif 
@@ -68,9 +67,132 @@ int fputc(int ch, FILE *f)
 #define USART1_TX_DMA_CLEAR_IT       DMA1_IT_GL4          // Clears channel 4 pending bits.
 #define USART1_TX_DMA_TC_IT          DMA1_IT_TC4          // Transfer complete interrupt.
 #define USART1_TX_DMA_TE_IT          DMA1_IT_TE4          // Transfer error interrupt.
+#define USART1_TX_BUFFER_SIZE        512U                 // TX ring size, one slot stays empty.
 
-static u8 USART1_TX_DMA_DUMMY = 0;
-static volatile u8 USART1_TX_DMA_BUSY = 0;
+static u8 USART1_TX_BUFFER[USART1_TX_BUFFER_SIZE];
+static volatile u16 USART1_TX_HEAD = 0U;
+static volatile u16 USART1_TX_TAIL = 0U;
+static volatile u16 USART1_TX_DMA_LEN = 0U;
+static volatile u8 USART1_TX_DMA_BUSY = 0U;
+
+/*
+ * Advance a USART1 TX ring index by one slot.
+ *
+ * The ring uses a power-independent wrap check instead of a bit mask so the
+ * buffer size can be changed without requiring a power of two. One slot is
+ * deliberately left empty to distinguish full and empty states.
+ *
+ * Parameters:
+ * index: Current ring index.
+ *
+ * Return value:
+ * Next ring index after wrapping at USART1_TX_BUFFER_SIZE.
+ *
+ * Side effects:
+ * None.
+ */
+static u16 USART1_TX_NextIndex(u16 index)
+{
+    index++;
+    if (index >= USART1_TX_BUFFER_SIZE)
+    {
+        index = 0U;
+    }
+
+    return index;
+}
+
+/*
+ * Count bytes currently queued in the USART1 TX ring.
+ *
+ * The caller must protect concurrent access against DMA1 Channel4 IRQ updates
+ * when reading a stable value from foreground code. The DMA ISR already runs
+ * with the channel interrupt active and uses this helper without extra locking.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * Number of queued bytes, including any bytes currently owned by DMA.
+ *
+ * Side effects:
+ * None.
+ */
+static u16 USART1_TX_BufferUsed(void)
+{
+    if (USART1_TX_HEAD >= USART1_TX_TAIL)
+    {
+        return (u16)(USART1_TX_HEAD - USART1_TX_TAIL);
+    }
+
+    return (u16)(USART1_TX_BUFFER_SIZE - USART1_TX_TAIL + USART1_TX_HEAD);
+}
+
+/*
+ * Count free bytes available for new USART1 TX data.
+ *
+ * The ring keeps one slot empty, so the maximum accepted payload is one byte
+ * smaller than the physical buffer. Callers use this value before copying data
+ * so a failed send never partially queues a message.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * Number of bytes that can be copied into the TX ring.
+ *
+ * Side effects:
+ * None.
+ */
+static u16 USART1_TX_BufferFreeInternal(void)
+{
+    return (u16)(USART1_TX_BUFFER_SIZE - 1U - USART1_TX_BufferUsed());
+}
+
+/*
+ * Start the next contiguous USART1 TX DMA segment if possible.
+ *
+ * DMA can only transmit a linear memory block. When queued data wraps around
+ * the ring end, this function sends the tail-to-end segment first; the DMA
+ * completion interrupt advances the tail and immediately starts the wrapped
+ * segment. The caller must hold a critical section or already be inside the
+ * DMA1 Channel4 interrupt.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Programs DMA1 Channel4 to send from USART1_TX_BUFFER to USART1->DR.
+ */
+static void USART1_TX_StartNextDMA(void)
+{
+    u16 length;
+
+    if ((USART1_TX_DMA_BUSY != 0U) || (USART1_TX_HEAD == USART1_TX_TAIL))
+    {
+        return;
+    }
+
+    if (USART1_TX_HEAD > USART1_TX_TAIL)
+    {
+        length = (u16)(USART1_TX_HEAD - USART1_TX_TAIL);
+    }
+    else
+    {
+        length = (u16)(USART1_TX_BUFFER_SIZE - USART1_TX_TAIL);
+    }
+
+    USART1_TX_DMA_BUSY = 1U;
+    USART1_TX_DMA_LEN = length;
+    DMA_Cmd(USART1_TX_DMA_CHANNEL, DISABLE);
+    DMA_ClearITPendingBit(USART1_TX_DMA_CLEAR_IT);
+    USART1_TX_DMA_CHANNEL->CMAR = (u32)&USART1_TX_BUFFER[USART1_TX_TAIL];
+    USART1_TX_DMA_CHANNEL->CNDTR = length;
+    DMA_Cmd(USART1_TX_DMA_CHANNEL, ENABLE);
+}
 
 /*使用microLib的方法*/
  /* 
@@ -101,11 +223,11 @@ u8 USART_RX_BUF[USART_REC_LEN];     //接收缓冲,最大USART_REC_LEN个字节.
 u16 USART_RX_STA=0;       //接收状态标记	  
   
 /*
- * Initialize USART1 with interrupt receive and DMA transmit support.
+ * Initialize USART1 with interrupt receive and ring-buffered DMA transmit support.
  *
  * PA9 is configured as USART1_TX, PA10 is configured as USART1_RX, and
  * DMA1 Channel4 is prepared for memory-to-USART1 transmit requests. The
- * DMA channel remains disabled until USART1_DMA_Send starts a transfer.
+ * DMA channel remains disabled until queued TX ring data starts a transfer.
  *
  * Parameters:
  * bound: USART1 baud rate.
@@ -164,7 +286,7 @@ void uart_init(u32 bound){
   USART_ITConfig(USART1, USART_IT_RXNE, ENABLE);//开启串口接受中断
   DMA_DeInit(USART1_TX_DMA_CHANNEL);
   DMA_InitStructure.DMA_PeripheralBaseAddr = (u32)&USART1->DR;
-  DMA_InitStructure.DMA_MemoryBaseAddr = (u32)&USART1_TX_DMA_DUMMY;
+  DMA_InitStructure.DMA_MemoryBaseAddr = (u32)USART1_TX_BUFFER;
   DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralDST;
   DMA_InitStructure.DMA_BufferSize = 1;
   DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
@@ -177,7 +299,10 @@ void uart_init(u32 bound){
   DMA_Init(USART1_TX_DMA_CHANNEL, &DMA_InitStructure);
   DMA_ITConfig(USART1_TX_DMA_CHANNEL, DMA_IT_TC | DMA_IT_TE, ENABLE);
   USART_DMACmd(USART1, USART_DMAReq_Tx, ENABLE);
-  USART1_TX_DMA_BUSY = 0;
+  USART1_TX_HEAD = 0U;
+  USART1_TX_TAIL = 0U;
+  USART1_TX_DMA_LEN = 0U;
+  USART1_TX_DMA_BUSY = 0U;
 
   USART_Cmd(USART1, ENABLE);                    //使能串口1 
 
@@ -219,72 +344,137 @@ void USART1_IRQHandler(void)                	//串口1中断服务程序
 #endif	
 
 /*
- * Start a non-blocking USART1 DMA transmit.
+ * Queue bytes for non-blocking USART1 DMA transmit.
  *
- * The caller must keep the data buffer unchanged until USART1_DMA_IsBusy
- * returns 0. The function refuses a new transfer while DMA1 Channel4 is
- * already active, so bytes from independent callers are not interleaved.
+ * Data is copied into the internal TX ring buffer before this function returns,
+ * so the caller may reuse its source buffer immediately. The function accepts
+ * the message only when the whole payload fits; otherwise it leaves the ring
+ * unchanged and returns 0. DMA1 Channel4 is started automatically when idle.
  *
  * Parameters:
  * data: Pointer to the first byte to send.
- * len: Number of bytes to send, from 1 to 65535.
+ * len: Number of bytes to send, from 1 to USART1_DMA_Free().
  *
  * Return value:
- * 1: Transfer was started.
- * 0: Parameters are invalid or a previous transfer is still active.
+ * 1: All bytes were queued.
+ * 0: Parameters are invalid or the TX ring does not have enough free space.
  *
  * Side effects:
- * Reprograms and enables DMA1 Channel4 for USART1_TX.
+ * Copies bytes into USART1_TX_BUFFER and may start DMA1 Channel4.
  */
 u8 USART1_DMA_Send(const u8 *data, u16 len)
 {
-    if ((data == 0) || (len == 0) || (USART1_TX_DMA_BUSY != 0))
+    u32 primask;
+    u16 index;
+
+    if ((data == 0) || (len == 0U))
     {
-        return 0;
+        return 0U;
     }
 
-    USART1_TX_DMA_BUSY = 1;
-    DMA_Cmd(USART1_TX_DMA_CHANNEL, DISABLE);
-    DMA_ClearITPendingBit(USART1_TX_DMA_CLEAR_IT);
-    USART1_TX_DMA_CHANNEL->CMAR = (u32)data;
-    USART1_TX_DMA_CHANNEL->CNDTR = len;
-    DMA_Cmd(USART1_TX_DMA_CHANNEL, ENABLE);
+    primask = __get_PRIMASK();
+    __disable_irq();
+    if (len > USART1_TX_BufferFreeInternal())
+    {
+        if (primask == 0U)
+        {
+            __enable_irq();
+        }
+        return 0U;
+    }
 
-    return 1;
+    for (index = 0U; index < len; index++)
+    {
+        USART1_TX_BUFFER[USART1_TX_HEAD] = data[index];
+        USART1_TX_HEAD = USART1_TX_NextIndex(USART1_TX_HEAD);
+    }
+    USART1_TX_StartNextDMA();
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+
+    return 1U;
 }
 
 /*
- * Query whether USART1 DMA transmit is still busy.
+ * Query free bytes in the USART1 TX ring buffer.
  *
- * The DMA interrupt clears the software busy flag when the last byte has
- * been written into USART1->DR. This function also checks USART_FLAG_TC so
- * callers that need the line to be idle can wait until the final stop bit
- * has left the transmitter.
+ * Foreground code can use this before queuing a large log block. The value is
+ * sampled inside a short critical section because the DMA completion interrupt
+ * may advance the tail while application code is checking available space.
  *
  * Parameters:
  * None.
  *
  * Return value:
- * 1: DMA or USART1 is still transmitting.
+ * Number of bytes that can be queued without blocking.
+ *
+ * Side effects:
+ * Briefly disables interrupts while reading ring indexes.
+ */
+u16 USART1_DMA_Free(void)
+{
+    u32 primask;
+    u16 free_count;
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+    free_count = USART1_TX_BufferFreeInternal();
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+
+    return free_count;
+}
+
+/*
+ * Query whether USART1 queued transmit data is still pending.
+ *
+ * The DMA interrupt clears the active segment and may immediately start the
+ * next contiguous ring segment. This function checks both ring occupancy and
+ * the final USART TC flag so callers that need the wire idle can wait until
+ * the last stop bit has left the transmitter.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * 1: Ring, DMA, or USART1 is still transmitting.
  * 0: USART1 transmit path is idle.
+ *
+ * Side effects:
+ * Briefly disables interrupts while reading ring state.
  */
 u8 USART1_DMA_IsBusy(void)
 {
-    if ((USART1_TX_DMA_BUSY != 0) || (USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET))
+    u32 primask;
+    u8 busy;
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+    busy = (u8)((USART1_TX_DMA_BUSY != 0U) || (USART1_TX_HEAD != USART1_TX_TAIL));
+    if (primask == 0U)
     {
-        return 1;
+        __enable_irq();
     }
 
-    return 0;
+    if ((busy != 0U) || (USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET))
+    {
+        return 1U;
+    }
+
+    return 0U;
 }
 
 /*
  * Handle DMA1 Channel4 completion for USART1 transmit.
  *
- * USART1_TX uses DMA1 Channel4 on STM32F103. The handler disables the DMA
- * channel after transfer-complete or transfer-error status, clears all
- * pending channel flags, and releases the software busy state for the next
- * transfer request.
+ * USART1_TX uses DMA1 Channel4 on STM32F103. The handler disables the completed
+ * DMA segment, advances the TX ring tail by the segment length, clears pending
+ * channel flags, and immediately starts the next contiguous segment when the
+ * ring still contains queued bytes.
  *
  * Parameters:
  * None.
@@ -293,7 +483,7 @@ u8 USART1_DMA_IsBusy(void)
  * None.
  *
  * Side effects:
- * Disables DMA1 Channel4 and updates USART1_TX_DMA_BUSY.
+ * Updates USART1 TX ring state and may restart DMA1 Channel4.
  */
 void DMA1_Channel4_IRQHandler(void)
 {
@@ -301,8 +491,18 @@ void DMA1_Channel4_IRQHandler(void)
         (DMA_GetITStatus(USART1_TX_DMA_TE_IT) != RESET))
     {
         DMA_Cmd(USART1_TX_DMA_CHANNEL, DISABLE);
-        USART1_TX_DMA_BUSY = 0;
+        if (USART1_TX_DMA_BUSY != 0U)
+        {
+            USART1_TX_TAIL = (u16)(USART1_TX_TAIL + USART1_TX_DMA_LEN);
+            if (USART1_TX_TAIL >= USART1_TX_BUFFER_SIZE)
+            {
+                USART1_TX_TAIL = (u16)(USART1_TX_TAIL - USART1_TX_BUFFER_SIZE);
+            }
+        }
+        USART1_TX_DMA_LEN = 0U;
+        USART1_TX_DMA_BUSY = 0U;
         DMA_ClearITPendingBit(USART1_TX_DMA_CLEAR_IT);
+        USART1_TX_StartNextDMA();
     }
 }
 

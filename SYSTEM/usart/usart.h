@@ -17,6 +17,7 @@ extern u16 USART_RX_STA;         		//接收状态标记
 //如果想串口中断接收，请不要注释以下宏定义
 void uart_init(u32 bound);
 u8 USART1_DMA_Send(const u8 *data, u16 len);
+u16 USART1_DMA_Free(void);
 u8 USART1_DMA_IsBusy(void);
 #endif
 
