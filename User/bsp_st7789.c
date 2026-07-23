@@ -1024,6 +1024,13 @@ uint8_t ST7789_AnimDeltaStart(
         ST7789_RecoverDMA();
     }
 
+    if (delta_size == 0U)
+    {
+        ST7789_ANIM_DELTA_JOB.state = ST7789_ANIM_DELTA_IDLE;
+        ST7789_ANIM_DELTA_JOB.active = 0U;
+        return 1U;
+    }
+
     ST7789_ANIM_DELTA_JOB.delta = delta;
     ST7789_ANIM_DELTA_JOB.delta_size = delta_size;
     ST7789_ANIM_DELTA_JOB.position = 0U;
@@ -1145,9 +1152,9 @@ ST7789_AnimDeltaResult ST7789_AnimDeltaTask(void)
 
             if (ST7789_ANIM_DELTA_JOB.position >= ST7789_ANIM_DELTA_JOB.delta_size)
             {
-                ST7789_ANIM_DELTA_JOB.state = ST7789_ANIM_DELTA_IDLE;
+                ST7789_ANIM_DELTA_JOB.state = ST7789_ANIM_DELTA_ERROR;
                 ST7789_ANIM_DELTA_JOB.active = 0U;
-                return ST7789_ANIM_DELTA_RESULT_DONE;
+                return ST7789_ANIM_DELTA_RESULT_ERROR;
             }
 
             control = ST7789_ANIM_DELTA_JOB.delta[ST7789_ANIM_DELTA_JOB.position++];
@@ -1194,6 +1201,14 @@ ST7789_AnimDeltaResult ST7789_AnimDeltaTask(void)
 
         if (ST7789_ANIM_DELTA_JOB.source_y >= ST7789_ANIM_DELTA_JOB.source_height)
         {
+            if (ST7789_ANIM_DELTA_JOB.position != ST7789_ANIM_DELTA_JOB.delta_size)
+            {
+                ST7789_ANIM_DELTA_JOB.state = ST7789_ANIM_DELTA_ERROR;
+                ST7789_ANIM_DELTA_JOB.active = 0U;
+                ST7789_WaitStreamComplete();
+                return ST7789_ANIM_DELTA_RESULT_ERROR;
+            }
+
             ST7789_ANIM_DELTA_JOB.state = ST7789_ANIM_DELTA_IDLE;
             ST7789_ANIM_DELTA_JOB.active = 0U;
             ST7789_WaitStreamComplete();

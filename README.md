@@ -37,20 +37,25 @@
 #define ST7789_Y_OFFSET            0U
 #define ST7789_USE_CS              0U
 #define ST7789_SPI_MODE            3U
+#define ST7789_SPI_PRESCALER       SPI_BaudRatePrescaler_2
 ```
 
 当前使用：
 
 - STM32F10x 标准外设库。
 - SPI2 主机模式、单线发送、8 位数据、MSB first。
-- SPI2 约 4.5 MHz。
+- SPI2 约 18 MHz。
+- ST7789 命令、控制参数和地址窗口仍使用同步 SPI 字节发送。
+- 清屏、矩形填充、完整帧和 GIF 差分像素流使用 SPI2 TX DMA。
+- SPI2 TX 映射到 DMA1 Channel5，DMA 完成中断负责释放发送状态。
 - 当前屏幕实测使用 SPI Mode 3。
 - RGB565 颜色格式。
 - 240x240 地址窗口，Y 偏移为 0。
 - 初始化期间先关闭背光，复位并清黑屏后再打开背光。
-- 不创建全屏帧缓冲，不使用动态内存。
+- 不创建全屏帧缓冲，不使用动态内存；驱动只使用两个 240 像素行缓冲。
 - TIM3 提供 1 ms 动画时基，等待下一帧期间主循环不阻塞。
 - 首帧完整写入，后续帧只更新变化像素。
+- GIF 差分刷新由异步状态机推进，主循环在 DMA 传输期间可以继续返回。
 
 ## SPI Mode 切换
 
@@ -81,10 +86,13 @@ User/app_st7789_anim.c
 User/fault_handlers.c
 SYSTEM/delay/delay.c
 SYSTEM/timing/timing.c
+SYSTEM/usart/usart.c
 Libraries/src/stm32f10x_gpio.c
 Libraries/src/stm32f10x_rcc.c
 Libraries/src/stm32f10x_spi.c
 Libraries/src/stm32f10x_tim.c
+Libraries/src/stm32f10x_usart.c
+Libraries/src/stm32f10x_dma.c
 ```
 
 程序入口是 [User/main.c](User/main.c)，屏幕驱动是
@@ -105,6 +113,8 @@ Libraries/src/stm32f10x_tim.c
 
 当前帧差数据为49109字节，动画数据合计56309字节。STM32 不在 RAM
 中保存上一帧，而是利用 ST7789 显存保留未变化区域。
+固件运行时会继续校验差分流边界：差分数据必须覆盖完整源图，提前结束或
+多余尾部字节都会触发错误恢复，重新绘制完整首帧后再继续播放。
 
 原始 `小猫图.gif` 是本地输入素材，不纳入 Git；仓库中已包含转换后的
 `anim_frames.c/.h`，正常编译和烧录不依赖原始 GIF。

@@ -9,8 +9,9 @@
  *
  * SysTick remains dedicated to the display driver's startup delays, while
  * TIM3 supplies the millisecond scheduler used between animation frames.
- * Each SPI frame update is synchronous, but the main loop never waits in a
- * frame-delay call and can later host additional cooperative tasks.
+ * Display commands and address windows still use synchronous SPI bytes, while
+ * pixel streams use SPI2 TX DMA. Delta-frame playback advances through a
+ * cooperative task and returns while DMA is moving pixel data.
  *
  * Parameters:
  * None.
