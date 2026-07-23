@@ -2,6 +2,7 @@
 #include "bsp_st7789.h"
 #include "delay.h"
 #include "timing.h"
+#include "usart.h"
 
 /*
  * Initialize the ST7789 and continuously service non-blocking GIF playback.
@@ -18,12 +19,13 @@
  * The firmware main loop does not return.
  *
  * Side effects:
- * Configures timing hardware, SPI2, GPIOB, and the ST7789 display.
+ * Configures timing hardware, USART1, SPI2, GPIOB, and the ST7789 display.
  */
 int main(void)
 {
     delay_init();
     Timing_Init();
+    uart_init(115200);
     ST7789_Init();
     App_ST7789_AnimInit();
 

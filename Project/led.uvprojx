@@ -340,7 +340,7 @@
               <MiscControls>-fgnu</MiscControls>
               <Define>STM32F10X_MD,USE_STDPERIPH_DRIVER</Define>
               <Undefine></Undefine>
-              <IncludePath>..\Libraries\CMSIS;..\Libraries\inc;..\User;..\SYSTEM\delay;..\SYSTEM\sys;..\SYSTEM\timing</IncludePath>
+              <IncludePath>..\Libraries\CMSIS;..\Libraries\inc;..\User;..\SYSTEM\delay;..\SYSTEM\sys;..\SYSTEM\timing;..\SYSTEM\usart</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -440,6 +440,16 @@
               <FilePath>..\Libraries\src\stm32f10x_tim.c</FilePath>
             </File>
             <File>
+              <FileName>stm32f10x_usart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Libraries\src\stm32f10x_usart.c</FilePath>
+            </File>
+            <File>
+              <FileName>stm32f10x_dma.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Libraries\src\stm32f10x_dma.c</FilePath>
+            </File>
+            <File>
               <FileName>misc.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Libraries\src\misc.c</FilePath>
@@ -523,6 +533,16 @@
               <FileName>timing.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\SYSTEM\timing\timing.h</FilePath>
+            </File>
+            <File>
+              <FileName>usart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\SYSTEM\usart\usart.c</FilePath>
+            </File>
+            <File>
+              <FileName>usart.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\SYSTEM\usart\usart.h</FilePath>
             </File>
           </Files>
         </Group>

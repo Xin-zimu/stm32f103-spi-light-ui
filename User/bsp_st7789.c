@@ -18,6 +18,52 @@
 #define ST7789_BLK_HIGH()           GPIO_SetBits(ST7789_GPIO_PORT, ST7789_BLK_PIN)
 #define ST7789_BLK_LOW()            GPIO_ResetBits(ST7789_GPIO_PORT, ST7789_BLK_PIN)
 
+#define ST7789_SPI_DMA_CHANNEL       DMA1_Channel5       // SPI2 TX DMA channel.
+#define ST7789_SPI_DMA_IRQ           DMA1_Channel5_IRQn   // SPI2 TX DMA interrupt.
+#define ST7789_SPI_DMA_CLEAR_IT      DMA1_IT_GL5          // Clears channel 5 pending bits.
+#define ST7789_SPI_DMA_TC_IT         DMA1_IT_TC5          // Transfer complete interrupt.
+#define ST7789_SPI_DMA_TE_IT         DMA1_IT_TE5          // Transfer error interrupt.
+#define ST7789_LINE_BUFFER_COUNT     2U                   // Double-buffered line count.
+#define ST7789_LINE_BUFFER_SIZE      (ST7789_WIDTH * 2U)  // One RGB565 display line.
+
+static uint8_t ST7789_LINE_BUFFER[ST7789_LINE_BUFFER_COUNT][ST7789_LINE_BUFFER_SIZE];
+static volatile uint8_t ST7789_SPI_DMA_BUSY = 0U;
+static volatile uint8_t ST7789_SPI_DMA_ERROR = 0U;
+
+typedef enum
+{
+    ST7789_ANIM_DELTA_IDLE = 0,        // No asynchronous delta job is active.
+    ST7789_ANIM_DELTA_SCAN,            // Scanning delta runs for the next changed segment.
+    ST7789_ANIM_DELTA_REPEAT,          // Repeating the current decoded segment vertically.
+    ST7789_ANIM_DELTA_ERROR            // Delta stream was invalid or DMA reported an error.
+} ST7789_AnimDeltaState;
+
+typedef struct
+{
+    const uint8_t *delta;              // Encoded delta stream.
+    uint32_t delta_size;               // Encoded delta byte count.
+    uint32_t position;                 // Current read offset in delta.
+    uint32_t payload_start;            // Start offset for the current changed run payload.
+    uint32_t payload_size;             // Current changed run payload byte count.
+    const uint16_t *palette;           // RGB565 palette.
+    uint16_t source_width;             // Source image width before scaling.
+    uint16_t source_height;            // Source image height before scaling.
+    uint16_t source_y;                 // Current source row.
+    uint16_t source_x;                 // Current source column.
+    uint16_t run_length;               // Current source-pixel run length.
+    uint8_t scale;                     // Integer display scale.
+    uint8_t repeat_y;                  // Vertical repeat index for the current run.
+    uint8_t buffer_index;              // Next free DMA line buffer index.
+    ST7789_AnimDeltaState state;       // Current asynchronous parser state.
+    uint8_t active;                    // Nonzero while a job is in progress.
+} ST7789_AnimDeltaJob;
+
+static ST7789_AnimDeltaJob ST7789_ANIM_DELTA_JOB;
+
+static uint8_t ST7789_IsDMAReady(void);
+static uint8_t ST7789_TryStartBufferDMA(const uint8_t *data, uint16_t length);
+static void ST7789_FinishBufferDMA(void);
+
 /*
  * 初始化 ST7789 使用的 GPIOB 引脚。
  *
@@ -70,13 +116,16 @@ void ST7789_GPIO_Init(void)
  * 无。
  *
  * 副作用：
- * 打开并重新配置 SPI2 外设。
+ * 打开并重新配置 SPI2 和 DMA1 Channel5。
  */
 void ST7789_SPI_Init(void)
 {
     SPI_InitTypeDef spi;
+    DMA_InitTypeDef dma;
+    NVIC_InitTypeDef nvic;
 
     RCC_APB1PeriphClockCmd(ST7789_SPI_CLK, ENABLE);
+    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
     SPI_I2S_DeInit(SPI2);
 
     spi.SPI_Direction = SPI_Direction_1Line_Tx;
@@ -98,6 +147,33 @@ void ST7789_SPI_Init(void)
 
     SPI_Init(SPI2, &spi);
     SPI_NSSInternalSoftwareConfig(SPI2, SPI_NSSInternalSoft_Set);
+
+    DMA_DeInit(ST7789_SPI_DMA_CHANNEL);
+    dma.DMA_PeripheralBaseAddr = (uint32_t)&SPI2->DR;
+    dma.DMA_MemoryBaseAddr = (uint32_t)ST7789_LINE_BUFFER[0];
+    dma.DMA_DIR = DMA_DIR_PeripheralDST;
+    dma.DMA_BufferSize = 1U;
+    dma.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+    dma.DMA_MemoryInc = DMA_MemoryInc_Enable;
+    dma.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
+    dma.DMA_MemoryDataSize = DMA_MemoryDataSize_Byte;
+    dma.DMA_Mode = DMA_Mode_Normal;
+    dma.DMA_Priority = DMA_Priority_High;
+    dma.DMA_M2M = DMA_M2M_Disable;
+    DMA_Init(ST7789_SPI_DMA_CHANNEL, &dma);
+    DMA_ITConfig(ST7789_SPI_DMA_CHANNEL, DMA_IT_TC | DMA_IT_TE, ENABLE);
+    DMA_ClearITPendingBit(ST7789_SPI_DMA_CLEAR_IT);
+
+    nvic.NVIC_IRQChannel = ST7789_SPI_DMA_IRQ;
+    nvic.NVIC_IRQChannelPreemptionPriority = 2U;
+    nvic.NVIC_IRQChannelSubPriority = 1U;
+    nvic.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_Init(&nvic);
+
+    ST7789_SPI_DMA_BUSY = 0U;
+    ST7789_SPI_DMA_ERROR = 0U;
+    SPI_I2S_DMACmd(SPI2, SPI_I2S_DMAReq_Tx, ENABLE);
+
     SPI_Cmd(SPI2, ENABLE);
 }
 
@@ -119,6 +195,8 @@ void ST7789_SPI_Init(void)
  */
 static void ST7789_WriteStreamByte(uint8_t data)
 {
+    ST7789_FinishBufferDMA();
+
     while (SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_TXE) == RESET)
     {
     }
@@ -146,6 +224,261 @@ static void ST7789_WaitStreamComplete(void)
     while (SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_BSY) == SET)
     {
     }
+}
+
+/*
+ * Check whether SPI2 TX DMA can accept a new buffer.
+ *
+ * The busy flag is released by DMA1_Channel5_IRQHandler, so this helper lets
+ * asynchronous producers return to the main loop instead of waiting for a
+ * transfer-complete flag in a tight polling loop.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * 1: DMA1 Channel5 is idle.
+ * 0: DMA1 Channel5 is still transmitting.
+ */
+static uint8_t ST7789_IsDMAReady(void)
+{
+    if (ST7789_SPI_DMA_BUSY != 0U)
+    {
+        return 0U;
+    }
+
+    return 1U;
+}
+
+/*
+ * Recover the SPI2 TX DMA channel after a transfer error.
+ *
+ * Transfer errors are rare, but leaving the SPI DMA request or channel in an
+ * unknown state can make the next frame hang. Recovery disables the channel,
+ * clears all pending channel interrupts, toggles the SPI2 TX DMA request, and
+ * resets the software state before the next transfer is queued.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Reinitializes the active DMA request path state for SPI2_TX.
+ */
+static void ST7789_RecoverDMA(void)
+{
+    DMA_Cmd(ST7789_SPI_DMA_CHANNEL, DISABLE);
+    DMA_ClearITPendingBit(ST7789_SPI_DMA_CLEAR_IT);
+    SPI_I2S_DMACmd(SPI2, SPI_I2S_DMAReq_Tx, DISABLE);
+    SPI_I2S_DMACmd(SPI2, SPI_I2S_DMAReq_Tx, ENABLE);
+    ST7789_SPI_DMA_BUSY = 0U;
+    ST7789_SPI_DMA_ERROR = 0U;
+}
+
+/*
+ * Wait until the active SPI2 TX DMA transfer has raised its interrupt.
+ *
+ * DMA1 Channel5_IRQHandler clears ST7789_SPI_DMA_BUSY on transfer-complete
+ * or transfer-error. The wait uses WFI instead of polling the DMA status
+ * register, then recovers the DMA request path if the interrupt reported TE.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ */
+static void ST7789_WaitDMAReady(void)
+{
+    while (ST7789_IsDMAReady() == 0U)
+    {
+        __WFI();
+    }
+
+    if (ST7789_SPI_DMA_ERROR != 0U)
+    {
+        ST7789_RecoverDMA();
+    }
+}
+
+/*
+ * Try to start one SPI2 TX DMA transfer from a prepared buffer.
+ *
+ * The function never waits for a previous transfer. It either starts the DMA
+ * channel immediately or reports that the caller should return and try again
+ * after DMA1_Channel5_IRQHandler releases the busy flag.
+ *
+ * Parameters:
+ * data: First byte to send through SPI2.
+ * length: Number of bytes to transmit, from 1 to 65535.
+ *
+ * Return value:
+ * 1: Transfer was started.
+ * 0: Parameters are invalid or DMA is still busy.
+ *
+ * Side effects:
+ * Reprograms and enables DMA1 Channel5 for SPI2_TX.
+ */
+static uint8_t ST7789_TryStartBufferDMA(const uint8_t *data, uint16_t length)
+{
+    if ((data == 0) || (length == 0U) || (ST7789_IsDMAReady() == 0U))
+    {
+        return 0U;
+    }
+
+    if (ST7789_SPI_DMA_ERROR != 0U)
+    {
+        ST7789_RecoverDMA();
+    }
+
+    ST7789_SPI_DMA_ERROR = 0U;
+    ST7789_SPI_DMA_BUSY = 1U;
+    DMA_Cmd(ST7789_SPI_DMA_CHANNEL, DISABLE);
+    DMA_ClearITPendingBit(ST7789_SPI_DMA_CLEAR_IT);
+    ST7789_SPI_DMA_CHANNEL->CMAR = (uint32_t)data;
+    ST7789_SPI_DMA_CHANNEL->CNDTR = length;
+    DMA_Cmd(ST7789_SPI_DMA_CHANNEL, ENABLE);
+
+    return 1U;
+}
+
+/*
+ * Start one SPI2 TX DMA transfer and wait only when the channel is busy.
+ *
+ * Synchronous display functions use this wrapper to preserve their existing
+ * call contract while still sharing the interrupt-completion path with the
+ * asynchronous animation state machine.
+ *
+ * Parameters:
+ * data: First byte to send through SPI2.
+ * length: Number of bytes to transmit, from 1 to 65535.
+ *
+ * Return value:
+ * None.
+ */
+static void ST7789_StartBufferDMA(const uint8_t *data, uint16_t length)
+{
+    if ((data == 0) || (length == 0U))
+    {
+        return;
+    }
+
+    while (ST7789_TryStartBufferDMA(data, length) == 0U)
+    {
+        __WFI();
+    }
+}
+
+/*
+ * Finish the current SPI2 TX DMA stream before changing display state.
+ *
+ * DMA completion only means the last byte has been written to SPI2->DR. The
+ * final BSY wait is still required before changing DC or the ST7789 address
+ * window, otherwise the last data byte can be interpreted with the next mode.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ */
+static void ST7789_FinishBufferDMA(void)
+{
+    ST7789_WaitDMAReady();
+    ST7789_WaitStreamComplete();
+}
+
+/*
+ * Fill the shared DMA line buffer with one RGB565 color.
+ *
+ * The buffer stores high byte first because ST7789 expects RGB565 data in
+ * big-endian byte order. The caller limits pixel_count to the visible line
+ * width, so the fixed one-line buffer is never overrun.
+ *
+ * Parameters:
+ * buffer: Target line buffer not currently owned by DMA.
+ * color: RGB565 color value.
+ * pixel_count: Number of pixels to encode into buffer.
+ *
+ * Return value:
+ * Number of bytes prepared for DMA transmission.
+ */
+static uint16_t ST7789_FillColorLine(
+    uint8_t *buffer,
+    uint16_t color,
+    uint16_t pixel_count
+)
+{
+    uint16_t pixel;
+    uint16_t offset;
+
+    offset = 0U;
+    for (pixel = 0U; pixel < pixel_count; pixel++)
+    {
+        buffer[offset++] = (uint8_t)(color >> 8);
+        buffer[offset++] = (uint8_t)color;
+    }
+
+    return offset;
+}
+
+/*
+ * Decode packed 4-bit palette pixels into the shared DMA line buffer.
+ *
+ * Each input byte contains two source pixels, high nibble first. Every source
+ * pixel is expanded horizontally by scale and converted to RGB565 high-byte,
+ * low-byte order ready for one SPI DMA transfer.
+ *
+ * Parameters:
+ * buffer: Target line buffer not currently owned by DMA.
+ * packed_pixels: Packed 4-bit palette indices for the start of the run.
+ * palette: Sixteen RGB565 colors.
+ * pixel_count: Number of source pixels to decode.
+ * scale: Horizontal expansion factor.
+ *
+ * Return value:
+ * Number of bytes prepared for DMA transmission.
+ */
+static uint16_t ST7789_BuildIndexed4Line(
+    uint8_t *buffer,
+    const uint8_t *packed_pixels,
+    const uint16_t *palette,
+    uint16_t pixel_count,
+    uint8_t scale
+)
+{
+    uint16_t pixel;
+    uint16_t offset;
+
+    offset = 0U;
+    for (pixel = 0U; pixel < pixel_count; pixel++)
+    {
+        uint8_t packed;
+        uint8_t palette_index;
+        uint8_t repeat_x;
+        uint16_t color;
+
+        packed = packed_pixels[pixel >> 1];
+        if ((pixel & 1U) == 0U)
+        {
+            palette_index = (uint8_t)(packed >> 4);
+        }
+        else
+        {
+            palette_index = (uint8_t)(packed & 0x0FU);
+        }
+        color = palette[palette_index];
+
+        for (repeat_x = 0U; repeat_x < scale; repeat_x++)
+        {
+            buffer[offset++] = (uint8_t)(color >> 8);
+            buffer[offset++] = (uint8_t)color;
+        }
+    }
+
+    return offset;
 }
 
 /*
@@ -333,8 +666,8 @@ void ST7789_SetAddressWindow(
 /*
  * 使用一个 RGB565 颜色填充整个 240x240 可见区域。
  *
- * 像素直接从常量变量流式发送到屏幕，不创建全屏缓冲区，因此只占用
- * 少量栈空间，不消耗 115200 字节 RAM。
+ * 函数预先构建两个相同的一行 RGB565 DMA 缓冲区并交替发送，不创建
+ * 全屏缓冲区，因此不消耗 115200 字节 RAM。
  *
  * 参数：
  * color：需要填充的 RGB565 颜色。
@@ -347,7 +680,9 @@ void ST7789_SetAddressWindow(
  */
 void ST7789_Clear(uint16_t color)
 {
-    uint32_t pixel_count;
+    uint16_t row;
+    uint16_t byte_count;
+    uint8_t buffer_index;
 
     ST7789_SetAddressWindow(
         0U,
@@ -357,22 +692,30 @@ void ST7789_Clear(uint16_t color)
     );
 
     ST7789_DC_HIGH();
-    for (pixel_count = 0U;
-         pixel_count < (uint32_t)ST7789_WIDTH * ST7789_HEIGHT;
-         pixel_count++)
+    byte_count = ST7789_FillColorLine(
+        ST7789_LINE_BUFFER[0],
+        color,
+        ST7789_WIDTH
+    );
+    (void)ST7789_FillColorLine(
+        ST7789_LINE_BUFFER[1],
+        color,
+        ST7789_WIDTH
+    );
+    for (row = 0U; row < ST7789_HEIGHT; row++)
     {
-        ST7789_WriteStreamByte((uint8_t)(color >> 8));
-        ST7789_WriteStreamByte((uint8_t)color);
+        buffer_index = (uint8_t)(row & 1U);
+        ST7789_StartBufferDMA(ST7789_LINE_BUFFER[buffer_index], byte_count);
     }
-    ST7789_WaitStreamComplete();
+    ST7789_FinishBufferDMA();
 }
 
 /*
  * 使用单一 RGB565 颜色填充可见区域中的矩形。
  *
  * 宽度或高度为 0、起点位于屏幕外时不执行写入。矩形越过右边界或下边界时
- * 自动裁剪，防止地址窗口超过当前 240x240 可见区域。像素直接流式发送，
- * 不申请矩形缓冲区。
+ * 自动裁剪，防止地址窗口超过当前 240x240 可见区域。函数预先构建
+ * 两个相同的一行 DMA 缓冲区，不申请矩形或全屏缓冲区。
  *
  * 参数：
  * x：矩形左上角 X 坐标。
@@ -395,7 +738,9 @@ void ST7789_FillRect(
     uint16_t color
 )
 {
-    uint32_t pixel_count;
+    uint16_t row;
+    uint16_t byte_count;
+    uint8_t buffer_index;
 
     if ((width == 0U) || (height == 0U) ||
         (x >= ST7789_WIDTH) || (y >= ST7789_HEIGHT))
@@ -420,21 +765,29 @@ void ST7789_FillRect(
     );
 
     ST7789_DC_HIGH();
-    for (pixel_count = 0U;
-         pixel_count < (uint32_t)width * height;
-         pixel_count++)
+    byte_count = ST7789_FillColorLine(
+        ST7789_LINE_BUFFER[0],
+        color,
+        width
+    );
+    (void)ST7789_FillColorLine(
+        ST7789_LINE_BUFFER[1],
+        color,
+        width
+    );
+    for (row = 0U; row < height; row++)
     {
-        ST7789_WriteStreamByte((uint8_t)(color >> 8));
-        ST7789_WriteStreamByte((uint8_t)color);
+        buffer_index = (uint8_t)(row & 1U);
+        ST7789_StartBufferDMA(ST7789_LINE_BUFFER[buffer_index], byte_count);
     }
-    ST7789_WaitStreamComplete();
+    ST7789_FinishBufferDMA();
 }
 
 /*
  * 将 4 位索引图片按整数倍放大后写满当前可见区域。
  *
  * 每个源数据字节保存两个像素索引，高半字节在前。函数逐源行、逐像素解码，
- * 并在水平和垂直方向重复 scale 次，直接向 ST7789 发送 RGB565 调色板颜色。
+ * 并在水平和垂直方向重复 scale 次。函数按行构建 RGB565 DMA 缓冲区，
  * 只有放大后的宽高恰好等于当前屏幕尺寸时才执行，避免错误图片参数造成越界。
  *
  * 参数：
@@ -460,6 +813,7 @@ void ST7789_ShowIndexed4Image(
 {
     uint16_t source_y;
     uint8_t repeat_y;
+    uint8_t buffer_index;
 
     if ((image == 0) || (palette == 0) || (scale == 0U) ||
         ((source_width & 1U) != 0U) ||
@@ -476,42 +830,36 @@ void ST7789_ShowIndexed4Image(
         ST7789_HEIGHT - 1U
     );
     ST7789_DC_HIGH();
+    buffer_index = 0U;
 
     for (source_y = 0U; source_y < source_height; source_y++)
     {
-        for (repeat_y = 0U; repeat_y < scale; repeat_y++)
+        uint16_t byte_count;
+
+        byte_count = ST7789_BuildIndexed4Line(
+            ST7789_LINE_BUFFER[buffer_index],
+            &image[((uint32_t)source_y * source_width) >> 1],
+            palette,
+            source_width,
+            scale
+        );
+        ST7789_StartBufferDMA(ST7789_LINE_BUFFER[buffer_index], byte_count);
+        buffer_index ^= 1U;
+
+        for (repeat_y = 1U; repeat_y < scale; repeat_y++)
         {
-            uint16_t source_x;
-
-            for (source_x = 0U; source_x < source_width; source_x++)
-            {
-                uint32_t source_index;
-                uint8_t packed;
-                uint8_t palette_index;
-                uint8_t repeat_x;
-                uint16_t color;
-
-                source_index = (uint32_t)source_y * source_width + source_x;
-                packed = image[source_index >> 1];
-                if ((source_x & 1U) == 0U)
-                {
-                    palette_index = (uint8_t)(packed >> 4);
-                }
-                else
-                {
-                    palette_index = (uint8_t)(packed & 0x0FU);
-                }
-                color = palette[palette_index];
-
-                for (repeat_x = 0U; repeat_x < scale; repeat_x++)
-                {
-                    ST7789_WriteStreamByte((uint8_t)(color >> 8));
-                    ST7789_WriteStreamByte((uint8_t)color);
-                }
-            }
+            byte_count = ST7789_BuildIndexed4Line(
+                ST7789_LINE_BUFFER[buffer_index],
+                &image[((uint32_t)source_y * source_width) >> 1],
+                palette,
+                source_width,
+                scale
+            );
+            ST7789_StartBufferDMA(ST7789_LINE_BUFFER[buffer_index], byte_count);
+            buffer_index ^= 1U;
         }
     }
-    ST7789_WaitStreamComplete();
+    ST7789_FinishBufferDMA();
 }
 
 /*
@@ -547,6 +895,7 @@ void ST7789_ApplyIndexed4Delta(
 {
     uint32_t position;
     uint16_t source_y;
+    uint8_t buffer_index;
 
     if ((delta == 0) || (palette == 0) || (scale == 0U) ||
         ((uint32_t)source_width * scale != ST7789_WIDTH) ||
@@ -556,6 +905,7 @@ void ST7789_ApplyIndexed4Delta(
     }
 
     position = 0U;
+    buffer_index = 0U;
     for (source_y = 0U; source_y < source_height; source_y++)
     {
         uint16_t source_x;
@@ -568,6 +918,7 @@ void ST7789_ApplyIndexed4Delta(
 
             if (position >= delta_size)
             {
+                ST7789_FinishBufferDMA();
                 return;
             }
 
@@ -575,17 +926,20 @@ void ST7789_ApplyIndexed4Delta(
             run_length = (uint16_t)((control & 0x7FU) + 1U);
             if (run_length > (uint16_t)(source_width - source_x))
             {
+                ST7789_FinishBufferDMA();
                 return;
             }
 
             if ((control & 0x80U) == 0U)
             {
                 uint32_t payload_size;
+                uint16_t byte_count;
                 uint8_t repeat_y;
 
                 payload_size = (run_length + 1U) >> 1;
                 if ((position + payload_size) > delta_size)
                 {
+                    ST7789_FinishBufferDMA();
                     return;
                 }
 
@@ -597,40 +951,287 @@ void ST7789_ApplyIndexed4Delta(
                 );
                 ST7789_DC_HIGH();
 
-                for (repeat_y = 0U; repeat_y < scale; repeat_y++)
+                byte_count = ST7789_BuildIndexed4Line(
+                    ST7789_LINE_BUFFER[buffer_index],
+                    &delta[position],
+                    palette,
+                    run_length,
+                    scale
+                );
+                ST7789_StartBufferDMA(ST7789_LINE_BUFFER[buffer_index], byte_count);
+                buffer_index ^= 1U;
+                for (repeat_y = 1U; repeat_y < scale; repeat_y++)
                 {
-                    uint16_t run_x;
-
-                    for (run_x = 0U; run_x < run_length; run_x++)
-                    {
-                        uint8_t packed;
-                        uint8_t palette_index;
-                        uint8_t repeat_x;
-                        uint16_t color;
-
-                        packed = delta[position + (run_x >> 1)];
-                        if ((run_x & 1U) == 0U)
-                        {
-                            palette_index = (uint8_t)(packed >> 4);
-                        }
-                        else
-                        {
-                            palette_index = (uint8_t)(packed & 0x0FU);
-                        }
-                        color = palette[palette_index];
-
-                        for (repeat_x = 0U; repeat_x < scale; repeat_x++)
-                        {
-                            ST7789_WriteStreamByte((uint8_t)(color >> 8));
-                            ST7789_WriteStreamByte((uint8_t)color);
-                        }
-                    }
+                    byte_count = ST7789_BuildIndexed4Line(
+                        ST7789_LINE_BUFFER[buffer_index],
+                        &delta[position],
+                        palette,
+                        run_length,
+                        scale
+                    );
+                    ST7789_StartBufferDMA(ST7789_LINE_BUFFER[buffer_index], byte_count);
+                    buffer_index ^= 1U;
                 }
-                ST7789_WaitStreamComplete();
                 position += payload_size;
             }
             source_x = (uint16_t)(source_x + run_length);
         }
+    }
+    ST7789_FinishBufferDMA();
+}
+
+/*
+ * Start an asynchronous ST7789 delta-frame update.
+ *
+ * The job stores only parser state and reuses the driver's two line buffers.
+ * The first complete frame is still drawn by ST7789_ShowIndexed4Image; this
+ * entry point is for later delta streams that update only changed runs.
+ *
+ * Parameters:
+ * delta: Encoded row-local delta stream.
+ * delta_size: Number of bytes available in delta; zero means no pixels changed.
+ * palette: Sixteen RGB565 palette entries.
+ * source_width: Source image width before scaling.
+ * source_height: Source image height before scaling.
+ * scale: Integer expansion factor to the ST7789 visible area.
+ *
+ * Return value:
+ * 1: Job was accepted.
+ * 0: Parameters are invalid or another display DMA job is active.
+ *
+ * Side effects:
+ * Resets the asynchronous delta parser state.
+ */
+uint8_t ST7789_AnimDeltaStart(
+    const uint8_t *delta,
+    uint32_t delta_size,
+    const uint16_t *palette,
+    uint16_t source_width,
+    uint16_t source_height,
+    uint8_t scale
+)
+{
+    if (((delta == 0) && (delta_size != 0U)) || (palette == 0) || (scale == 0U) ||
+        (ST7789_ANIM_DELTA_JOB.active != 0U) || (ST7789_IsDMAReady() == 0U) ||
+        ((uint32_t)source_width * scale != ST7789_WIDTH) ||
+        ((uint32_t)source_height * scale != ST7789_HEIGHT))
+    {
+        return 0U;
+    }
+
+    if (ST7789_SPI_DMA_ERROR != 0U)
+    {
+        ST7789_RecoverDMA();
+    }
+
+    ST7789_ANIM_DELTA_JOB.delta = delta;
+    ST7789_ANIM_DELTA_JOB.delta_size = delta_size;
+    ST7789_ANIM_DELTA_JOB.position = 0U;
+    ST7789_ANIM_DELTA_JOB.payload_start = 0U;
+    ST7789_ANIM_DELTA_JOB.payload_size = 0U;
+    ST7789_ANIM_DELTA_JOB.palette = palette;
+    ST7789_ANIM_DELTA_JOB.source_width = source_width;
+    ST7789_ANIM_DELTA_JOB.source_height = source_height;
+    ST7789_ANIM_DELTA_JOB.source_y = 0U;
+    ST7789_ANIM_DELTA_JOB.source_x = 0U;
+    ST7789_ANIM_DELTA_JOB.run_length = 0U;
+    ST7789_ANIM_DELTA_JOB.scale = scale;
+    ST7789_ANIM_DELTA_JOB.repeat_y = 0U;
+    ST7789_ANIM_DELTA_JOB.buffer_index = 0U;
+    ST7789_ANIM_DELTA_JOB.state = ST7789_ANIM_DELTA_SCAN;
+    ST7789_ANIM_DELTA_JOB.active = 1U;
+
+    return 1U;
+}
+
+/*
+ * Query whether an asynchronous ST7789 delta-frame update is active.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * 1: A delta update is still being parsed or transmitted.
+ * 0: No asynchronous delta update is active.
+ */
+uint8_t ST7789_AnimDeltaBusy(void)
+{
+    if (ST7789_ANIM_DELTA_JOB.active != 0U)
+    {
+        return 1U;
+    }
+
+    return 0U;
+}
+
+/*
+ * Advance the asynchronous ST7789 delta-frame update by one DMA-sized step.
+ *
+ * The function returns quickly while DMA is busy. When DMA is idle it may
+ * parse skip runs, set one changed address window, build one line buffer, and
+ * start one DMA transfer. Repeated vertical scale lines are sent on later
+ * calls, allowing the main loop to keep servicing other cooperative tasks.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * ST7789_ANIM_DELTA_RESULT_BUSY: The job is still active after this call.
+ * ST7789_ANIM_DELTA_RESULT_DONE: The job completed normally or is idle.
+ * ST7789_ANIM_DELTA_RESULT_ERROR: DMA failed or the delta stream was invalid.
+ *
+ * Side effects:
+ * Sends changed ST7789 pixel runs through SPI2 TX DMA.
+ */
+ST7789_AnimDeltaResult ST7789_AnimDeltaTask(void)
+{
+    while (ST7789_ANIM_DELTA_JOB.active != 0U)
+    {
+        uint8_t buffer_index;
+        uint16_t byte_count;
+
+        if (ST7789_IsDMAReady() == 0U)
+        {
+            return ST7789_ANIM_DELTA_RESULT_BUSY;
+        }
+        if (ST7789_SPI_DMA_ERROR != 0U)
+        {
+            ST7789_RecoverDMA();
+            ST7789_ANIM_DELTA_JOB.state = ST7789_ANIM_DELTA_ERROR;
+            ST7789_ANIM_DELTA_JOB.active = 0U;
+            return ST7789_ANIM_DELTA_RESULT_ERROR;
+        }
+
+        if (ST7789_ANIM_DELTA_JOB.state == ST7789_ANIM_DELTA_REPEAT)
+        {
+            if (ST7789_ANIM_DELTA_JOB.repeat_y < ST7789_ANIM_DELTA_JOB.scale)
+            {
+                buffer_index = ST7789_ANIM_DELTA_JOB.buffer_index;
+                byte_count = ST7789_BuildIndexed4Line(
+                    ST7789_LINE_BUFFER[buffer_index],
+                    &ST7789_ANIM_DELTA_JOB.delta[ST7789_ANIM_DELTA_JOB.payload_start],
+                    ST7789_ANIM_DELTA_JOB.palette,
+                    ST7789_ANIM_DELTA_JOB.run_length,
+                    ST7789_ANIM_DELTA_JOB.scale
+                );
+                if (ST7789_TryStartBufferDMA(ST7789_LINE_BUFFER[buffer_index], byte_count) == 0U)
+                {
+                    return ST7789_ANIM_DELTA_RESULT_BUSY;
+                }
+                ST7789_ANIM_DELTA_JOB.buffer_index ^= 1U;
+                ST7789_ANIM_DELTA_JOB.repeat_y++;
+                return ST7789_ANIM_DELTA_RESULT_BUSY;
+            }
+
+            ST7789_WaitStreamComplete();
+            ST7789_ANIM_DELTA_JOB.position =
+                ST7789_ANIM_DELTA_JOB.payload_start + ST7789_ANIM_DELTA_JOB.payload_size;
+            ST7789_ANIM_DELTA_JOB.source_x =
+                (uint16_t)(ST7789_ANIM_DELTA_JOB.source_x + ST7789_ANIM_DELTA_JOB.run_length);
+            ST7789_ANIM_DELTA_JOB.repeat_y = 0U;
+            ST7789_ANIM_DELTA_JOB.state = ST7789_ANIM_DELTA_SCAN;
+        }
+
+        while (ST7789_ANIM_DELTA_JOB.source_y < ST7789_ANIM_DELTA_JOB.source_height)
+        {
+            uint8_t control;
+
+            if (ST7789_ANIM_DELTA_JOB.source_x >= ST7789_ANIM_DELTA_JOB.source_width)
+            {
+                ST7789_ANIM_DELTA_JOB.source_x = 0U;
+                ST7789_ANIM_DELTA_JOB.source_y++;
+                continue;
+            }
+
+            if (ST7789_ANIM_DELTA_JOB.position >= ST7789_ANIM_DELTA_JOB.delta_size)
+            {
+                ST7789_ANIM_DELTA_JOB.state = ST7789_ANIM_DELTA_IDLE;
+                ST7789_ANIM_DELTA_JOB.active = 0U;
+                return ST7789_ANIM_DELTA_RESULT_DONE;
+            }
+
+            control = ST7789_ANIM_DELTA_JOB.delta[ST7789_ANIM_DELTA_JOB.position++];
+            ST7789_ANIM_DELTA_JOB.run_length = (uint16_t)((control & 0x7FU) + 1U);
+            if (ST7789_ANIM_DELTA_JOB.run_length >
+                (uint16_t)(ST7789_ANIM_DELTA_JOB.source_width - ST7789_ANIM_DELTA_JOB.source_x))
+            {
+                ST7789_ANIM_DELTA_JOB.state = ST7789_ANIM_DELTA_ERROR;
+                ST7789_ANIM_DELTA_JOB.active = 0U;
+                return ST7789_ANIM_DELTA_RESULT_ERROR;
+            }
+
+            if ((control & 0x80U) != 0U)
+            {
+                ST7789_ANIM_DELTA_JOB.source_x =
+                    (uint16_t)(ST7789_ANIM_DELTA_JOB.source_x + ST7789_ANIM_DELTA_JOB.run_length);
+                continue;
+            }
+
+            ST7789_ANIM_DELTA_JOB.payload_start = ST7789_ANIM_DELTA_JOB.position;
+            ST7789_ANIM_DELTA_JOB.payload_size = (ST7789_ANIM_DELTA_JOB.run_length + 1U) >> 1;
+            if ((ST7789_ANIM_DELTA_JOB.position + ST7789_ANIM_DELTA_JOB.payload_size) >
+                ST7789_ANIM_DELTA_JOB.delta_size)
+            {
+                ST7789_ANIM_DELTA_JOB.state = ST7789_ANIM_DELTA_ERROR;
+                ST7789_ANIM_DELTA_JOB.active = 0U;
+                return ST7789_ANIM_DELTA_RESULT_ERROR;
+            }
+
+            ST7789_SetAddressWindow(
+                (uint16_t)(ST7789_ANIM_DELTA_JOB.source_x * ST7789_ANIM_DELTA_JOB.scale),
+                (uint16_t)(ST7789_ANIM_DELTA_JOB.source_y * ST7789_ANIM_DELTA_JOB.scale),
+                (uint16_t)((ST7789_ANIM_DELTA_JOB.source_x + ST7789_ANIM_DELTA_JOB.run_length) *
+                           ST7789_ANIM_DELTA_JOB.scale - 1U),
+                (uint16_t)((ST7789_ANIM_DELTA_JOB.source_y + 1U) *
+                           ST7789_ANIM_DELTA_JOB.scale - 1U)
+            );
+            ST7789_DC_HIGH();
+
+            ST7789_ANIM_DELTA_JOB.repeat_y = 0U;
+            ST7789_ANIM_DELTA_JOB.state = ST7789_ANIM_DELTA_REPEAT;
+            break;
+        }
+
+        if (ST7789_ANIM_DELTA_JOB.source_y >= ST7789_ANIM_DELTA_JOB.source_height)
+        {
+            ST7789_ANIM_DELTA_JOB.state = ST7789_ANIM_DELTA_IDLE;
+            ST7789_ANIM_DELTA_JOB.active = 0U;
+            ST7789_WaitStreamComplete();
+            return ST7789_ANIM_DELTA_RESULT_DONE;
+        }
+    }
+
+    return ST7789_ANIM_DELTA_RESULT_DONE;
+}
+
+/*
+ * Handle SPI2 TX DMA completion.
+ *
+ * STM32F103 maps SPI2_TX to DMA1 Channel5. The interrupt stops the channel,
+ * records transfer-error status when present, clears all pending channel bits,
+ * and releases the busy flag so the producer can start the next line buffer.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Updates ST7789_SPI_DMA_BUSY and ST7789_SPI_DMA_ERROR.
+ */
+void DMA1_Channel5_IRQHandler(void)
+{
+    if ((DMA_GetITStatus(ST7789_SPI_DMA_TC_IT) != RESET) ||
+        (DMA_GetITStatus(ST7789_SPI_DMA_TE_IT) != RESET))
+    {
+        if (DMA_GetITStatus(ST7789_SPI_DMA_TE_IT) != RESET)
+        {
+            ST7789_SPI_DMA_ERROR = 1U;
+        }
+        DMA_Cmd(ST7789_SPI_DMA_CHANNEL, DISABLE);
+        DMA_ClearITPendingBit(ST7789_SPI_DMA_CLEAR_IT);
+        ST7789_SPI_DMA_BUSY = 0U;
     }
 }
 

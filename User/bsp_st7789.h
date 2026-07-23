@@ -67,5 +67,22 @@ void ST7789_ApplyIndexed4Delta(
     uint16_t source_height,
     uint8_t scale
 );
+typedef enum
+{
+    ST7789_ANIM_DELTA_RESULT_BUSY = 0,  // Job is still active.
+    ST7789_ANIM_DELTA_RESULT_DONE,      // Job completed normally.
+    ST7789_ANIM_DELTA_RESULT_ERROR      // Job stopped because DMA or data failed.
+} ST7789_AnimDeltaResult;
+
+uint8_t ST7789_AnimDeltaStart(
+    const uint8_t *delta,
+    uint32_t delta_size,
+    const uint16_t *palette,
+    uint16_t source_width,
+    uint16_t source_height,
+    uint8_t scale
+);
+ST7789_AnimDeltaResult ST7789_AnimDeltaTask(void);
+uint8_t ST7789_AnimDeltaBusy(void);
 
 #endif
