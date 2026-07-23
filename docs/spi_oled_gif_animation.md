@@ -71,8 +71,31 @@ SPI2 TX 映射到 DMA1 Channel5。驱动准备两个 240 像素行缓冲，DMA �
 3. 量化并编码全部28帧数据。
 4. 对每个帧差执行反向解码，必须与量化帧完全一致。
 5. 将输入 GIF 的 SHA-256 写入头文件，便于确认数据来源。
+6. 输出差分段统计，便于评估 DMA 段数量和像素传输量。
 
 生成的`anim_frames.c/.h`使用代码页936、无BOM，适配Arm Compiler 6工程。
+
+脚本默认使用 `--merge-gap 1`，等价于原先只桥接 1 个源像素短空洞的策略。
+如果需要比较不同短空洞合并策略，可以只输出统计而不改写固件数组：
+
+```powershell
+py -B Tools\generate_st7789_gif.py --stats-only --compare-gaps 0,1,2,4
+```
+
+统计字段含义：
+
+- `delta_bytes`：写入 Flash 的全部帧差字节数。
+- `draw_runs`：需要设置地址窗口并发送像素的绘制段数量。
+- `skip_runs`：保留 ST7789 显存不刷新的跳过段数量。
+- `dma_bytes`：按 2 倍缩放和 RGB565 计算的实际 DMA 像素字节数。
+- `small_runs`：长度小于等于 `--small-run-limit` 的短绘制段数量。
+
+增大 `--merge-gap` 会把两个变化段之间较短的未变化像素一起刷新，通常会减少
+地址窗口和 DMA 启动次数，但会增加像素传输量。确定新参数后再正常生成：
+
+```powershell
+py -B Tools\generate_st7789_gif.py --merge-gap 2
+```
 
 运行时的异步差分任务也会检查流边界。非零差分流必须通过跳过段和绘制段
 覆盖完整 120x120 源图；如果数据提前结束、段长度越过行尾、绘制段载荷

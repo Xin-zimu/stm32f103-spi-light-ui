@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -16,6 +18,55 @@ PALETTE_SIZE = 16
 FRAME_COUNT = 28
 FRAME_INTERVAL_MS = 40
 FIRST_FRAME_SIZE = WIDTH * HEIGHT // 2
+
+
+@dataclass
+class DeltaStats:
+    """Aggregate encode-time statistics for one or more ST7789 delta streams."""
+
+    delta_bytes: int = 0
+    draw_runs: int = 0
+    skip_runs: int = 0
+    draw_source_pixels: int = 0
+    skip_source_pixels: int = 0
+    min_draw_run: int = 0
+    max_draw_run: int = 0
+    small_draw_runs: int = 0
+
+    def add_draw(self, run_length: int, small_run_limit: int) -> None:
+        """Record one encoded drawing run."""
+        self.draw_runs += 1
+        self.draw_source_pixels += run_length
+        if self.min_draw_run == 0 or run_length < self.min_draw_run:
+            self.min_draw_run = run_length
+        if run_length > self.max_draw_run:
+            self.max_draw_run = run_length
+        if run_length <= small_run_limit:
+            self.small_draw_runs += 1
+
+    def add_skip(self, run_length: int) -> None:
+        """Record one encoded unchanged run."""
+        self.skip_runs += 1
+        self.skip_source_pixels += run_length
+
+    def merge(self, other: "DeltaStats") -> None:
+        """Merge another statistics block into this aggregate."""
+        self.delta_bytes += other.delta_bytes
+        self.draw_runs += other.draw_runs
+        self.skip_runs += other.skip_runs
+        self.draw_source_pixels += other.draw_source_pixels
+        self.skip_source_pixels += other.skip_source_pixels
+        if other.min_draw_run != 0:
+            if self.min_draw_run == 0 or other.min_draw_run < self.min_draw_run:
+                self.min_draw_run = other.min_draw_run
+        if other.max_draw_run > self.max_draw_run:
+            self.max_draw_run = other.max_draw_run
+        self.small_draw_runs += other.small_draw_runs
+
+    @property
+    def dma_bytes(self) -> int:
+        """Return RGB565 bytes sent after ST7789 pixel scaling."""
+        return self.draw_source_pixels * PIXEL_SCALE * PIXEL_SCALE * 2
 
 
 def load_frames(path: Path) -> list[Image.Image]:
@@ -81,18 +132,49 @@ def pack_indexes(indexes: Sequence[int]) -> list[int]:
     ]
 
 
-def encode_delta(current: Sequence[int], previous: Sequence[int]) -> list[int]:
-    """Encode one frame as row-local runs, bridging one-pixel unchanged gaps."""
+def merge_short_gaps(changed: list[bool], merge_gap: int) -> None:
+    """Mark short unchanged gaps between changed pixels as changed."""
+    if merge_gap <= 0:
+        return
+
+    column = 0
+    while column < WIDTH:
+        while column < WIDTH and not changed[column]:
+            column += 1
+        while column < WIDTH and changed[column]:
+            column += 1
+
+        gap_start = column
+        while column < WIDTH and not changed[column]:
+            column += 1
+        gap_length = column - gap_start
+
+        if (
+            gap_length > 0
+            and gap_length <= merge_gap
+            and gap_start > 0
+            and column < WIDTH
+        ):
+            for gap_column in range(gap_start, column):
+                changed[gap_column] = True
+
+
+def encode_delta(
+    current: Sequence[int],
+    previous: Sequence[int],
+    merge_gap: int,
+    small_run_limit: int,
+) -> tuple[list[int], DeltaStats]:
+    """Encode one frame as row-local runs, optionally bridging short gaps."""
     encoded: list[int] = []
+    stats = DeltaStats()
     for row in range(HEIGHT):
         row_start = row * WIDTH
         changed = [
             current[row_start + column] != previous[row_start + column]
             for column in range(WIDTH)
         ]
-        for column in range(1, WIDTH - 1):
-            if not changed[column] and changed[column - 1] and changed[column + 1]:
-                changed[column] = True
+        merge_short_gaps(changed, merge_gap)
 
         column = 0
         while column < WIDTH:
@@ -107,8 +189,10 @@ def encode_delta(current: Sequence[int], previous: Sequence[int]) -> list[int]:
 
             if unchanged:
                 encoded.append(0x80 | (count - 1))
+                stats.add_skip(count)
             else:
                 encoded.append(count - 1)
+                stats.add_draw(count, small_run_limit)
                 run = current[
                     row_start + column : row_start + column + count
                 ]
@@ -116,7 +200,9 @@ def encode_delta(current: Sequence[int], previous: Sequence[int]) -> list[int]:
                     run = [*run, 0]
                 encoded.extend(pack_indexes(run))
             column += count
-    return encoded
+
+    stats.delta_bytes = len(encoded)
+    return encoded, stats
 
 
 def apply_delta(encoded: Sequence[int], previous: Sequence[int]) -> list[int]:
@@ -234,8 +320,103 @@ const uint8_t anim_delta_data[ANIM_DELTA_DATA_SIZE] =
 """
 
 
+def build_animation(
+    indexes: Sequence[Sequence[int]],
+    merge_gap: int,
+    small_run_limit: int,
+) -> tuple[list[int], list[int], list[int], DeltaStats]:
+    """Build first-frame data, delta offsets, delta bytes, and statistics."""
+    first_frame = pack_indexes(indexes[0])
+
+    offsets = [0]
+    delta_data: list[int] = []
+    aggregate = DeltaStats()
+    for frame_index in range(len(indexes)):
+        next_index = (frame_index + 1) % len(indexes)
+        encoded, stats = encode_delta(
+            indexes[next_index],
+            indexes[frame_index],
+            merge_gap,
+            small_run_limit,
+        )
+        if apply_delta(encoded, indexes[frame_index]) != indexes[next_index]:
+            raise ValueError(f"delta round-trip failed after frame {frame_index}")
+        aggregate.merge(stats)
+        delta_data.extend(encoded)
+        offsets.append(len(delta_data))
+
+    aggregate.delta_bytes = len(delta_data)
+    return first_frame, offsets, delta_data, aggregate
+
+
+def format_stats(merge_gap: int, stats: DeltaStats) -> str:
+    """Format one statistics line for comparing gap-merge settings."""
+    return (
+        f"merge_gap={merge_gap}: "
+        f"delta_bytes={stats.delta_bytes}, "
+        f"draw_runs={stats.draw_runs}, "
+        f"skip_runs={stats.skip_runs}, "
+        f"dma_bytes={stats.dma_bytes}, "
+        f"draw_source_pixels={stats.draw_source_pixels}, "
+        f"min_run={stats.min_draw_run}, "
+        f"max_run={stats.max_draw_run}, "
+        f"small_runs={stats.small_draw_runs}"
+    )
+
+
+def parse_gap_list(text: str) -> list[int]:
+    """Parse a comma-separated list of non-negative merge gaps."""
+    gaps: list[int] = []
+    if not text.strip():
+        return gaps
+
+    for item in text.split(","):
+        gap = int(item.strip())
+        if gap < 0:
+            raise ValueError("merge gaps must be non-negative")
+        if gap not in gaps:
+            gaps.append(gap)
+    return gaps
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line options for ST7789 GIF generation and analysis."""
+    parser = argparse.ArgumentParser(
+        description="Convert the local 120x120 cat GIF into ST7789 animation data."
+    )
+    parser.add_argument(
+        "--merge-gap",
+        type=int,
+        default=1,
+        help="unchanged source-pixel gap length to merge into drawing runs",
+    )
+    parser.add_argument(
+        "--compare-gaps",
+        default="",
+        help="comma-separated merge gaps to report without changing output",
+    )
+    parser.add_argument(
+        "--small-run-limit",
+        type=int,
+        default=4,
+        help="source-pixel run length counted as a small drawing run",
+    )
+    parser.add_argument(
+        "--stats-only",
+        action="store_true",
+        help="print statistics without writing anim_frames.c/.h",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
     """Generate firmware animation data from the local cat GIF."""
+    args = parse_args()
+    if args.merge_gap < 0:
+        raise ValueError("--merge-gap must be non-negative")
+    if args.small_run_limit < 1:
+        raise ValueError("--small-run-limit must be at least 1")
+
     project_root = Path(__file__).resolve().parent.parent
     source = project_root / "小猫图.gif"
     output_c = project_root / "User" / "anim_frames.c"
@@ -243,17 +424,28 @@ def main() -> int:
 
     frames = load_frames(source)
     palette, indexes = quantize_frames(frames)
-    first_frame = pack_indexes(indexes[0])
+    first_frame, offsets, delta_data, stats = build_animation(
+        indexes,
+        args.merge_gap,
+        args.small_run_limit,
+    )
 
-    offsets = [0]
-    delta_data: list[int] = []
-    for frame_index in range(len(indexes)):
-        next_index = (frame_index + 1) % len(indexes)
-        encoded = encode_delta(indexes[next_index], indexes[frame_index])
-        if apply_delta(encoded, indexes[frame_index]) != indexes[next_index]:
-            raise ValueError(f"delta round-trip failed after frame {frame_index}")
-        delta_data.extend(encoded)
-        offsets.append(len(delta_data))
+    report_gaps = parse_gap_list(args.compare_gaps)
+    if args.merge_gap not in report_gaps:
+        report_gaps.insert(0, args.merge_gap)
+    for gap in report_gaps:
+        if gap == args.merge_gap:
+            report_stats = stats
+        else:
+            _, _, _, report_stats = build_animation(
+                indexes,
+                gap,
+                args.small_run_limit,
+            )
+        print(format_stats(gap, report_stats))
+
+    if args.stats_only:
+        return 0
 
     source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
     output_h.write_text(
@@ -269,7 +461,8 @@ def main() -> int:
     print(
         f"generated {len(indexes)} frames: "
         f"{len(first_frame)} first-frame bytes + "
-        f"{len(delta_data)} delta bytes"
+        f"{len(delta_data)} delta bytes "
+        f"(merge_gap={args.merge_gap})"
     )
     return 0
 
