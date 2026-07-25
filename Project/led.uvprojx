@@ -440,11 +440,6 @@
               <FilePath>..\Libraries\src\stm32f10x_tim.c</FilePath>
             </File>
             <File>
-              <FileName>stm32f10x_usart.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Libraries\src\stm32f10x_usart.c</FilePath>
-            </File>
-            <File>
               <FileName>stm32f10x_dma.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Libraries\src\stm32f10x_dma.c</FilePath>
@@ -500,9 +495,34 @@
               <FilePath>..\User\app_st7789_anim.h</FilePath>
             </File>
             <File>
-              <FileName>fault_handlers.c</FileName>
+              <FileName>key_driver.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\User\fault_handlers.c</FilePath>
+              <FilePath>..\User\key_driver.c</FilePath>
+            </File>
+            <File>
+              <FileName>key_driver.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\key_driver.h</FilePath>
+            </File>
+            <File>
+              <FileName>ui_event.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\ui_event.c</FilePath>
+            </File>
+            <File>
+              <FileName>ui_event.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\ui_event.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_ui.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\app_ui.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_ui.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\app_ui.h</FilePath>
             </File>
           </Files>
         </Group>
@@ -533,16 +553,6 @@
               <FileName>timing.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\SYSTEM\timing\timing.h</FilePath>
-            </File>
-            <File>
-              <FileName>usart.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\SYSTEM\usart\usart.c</FilePath>
-            </File>
-            <File>
-              <FileName>usart.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\SYSTEM\usart\usart.h</FilePath>
             </File>
           </Files>
         </Group>

@@ -5,6 +5,7 @@
 
 static uint32_t g_anim_last_tick = 0U;
 static uint8_t g_anim_transition_index = 0U;
+static uint8_t g_anim_paused = 1U;
 
 /*
  * Draw the first retained GIF frame and reset animation scheduling.
@@ -112,7 +113,59 @@ static void App_ST7789_HandleDeltaResult(ST7789_AnimDeltaResult result)
  */
 void App_ST7789_AnimInit(void)
 {
+    g_anim_paused = 0U;
     App_ST7789_DrawFirstFrameAndReset();
+}
+
+/*
+ * Restart GIF playback from the retained first frame.
+ *
+ * This entry point is used when the UI enters or replays the GIF page. Drawing
+ * the first frame reestablishes the ST7789 RAM base image required by later
+ * delta transitions, then playback resumes from transition zero.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Replaces the full ST7789 image, clears the paused flag, and resets timing.
+ */
+void App_ST7789_AnimRestart(void)
+{
+    g_anim_paused = 0U;
+    App_ST7789_DrawFirstFrameAndReset();
+}
+
+/*
+ * Toggle GIF playback pause state without changing the current display image.
+ *
+ * Resuming resets the frame deadline to the current tick so a long pause does
+ * not cause a burst of overdue delta transitions. Any in-flight delta update
+ * is allowed to finish before the pause takes visible effect.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Updates playback scheduling state.
+ */
+void App_ST7789_AnimTogglePaused(void)
+{
+    if (g_anim_paused == 0U)
+    {
+        g_anim_paused = 1U;
+    }
+    else
+    {
+        g_anim_paused = 0U;
+        g_anim_last_tick = Timing_GetTick();
+    }
 }
 
 /*
@@ -141,6 +194,11 @@ void App_ST7789_AnimTask(void)
     {
         result = ST7789_AnimDeltaTask();
         App_ST7789_HandleDeltaResult(result);
+        return;
+    }
+
+    if (g_anim_paused != 0U)
+    {
         return;
     }
 

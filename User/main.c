@@ -1,17 +1,17 @@
 #include "app_st7789_anim.h"
+#include "app_ui.h"
 #include "bsp_st7789.h"
 #include "delay.h"
+#include "key_driver.h"
 #include "timing.h"
-#include "usart.h"
 
 /*
- * Initialize the ST7789 and continuously service non-blocking GIF playback.
+ * Initialize the board and continuously service the lightweight UI system.
  *
- * SysTick remains dedicated to the display driver's startup delays, while
- * TIM3 supplies the millisecond scheduler used between animation frames.
- * Display commands and address windows still use synchronous SPI bytes, while
- * pixel streams use SPI2 TX DMA. Delta-frame playback advances through a
- * cooperative task and returns while DMA is moving pixel data.
+ * SysTick remains dedicated to the display driver's startup delays, while TIM3
+ * supplies the millisecond scheduler used by key scanning and GIF playback.
+ * PA0 through PA6 are configured as common-ground joystick inputs, and the UI
+ * task decides when to enter the existing ST7789 GIF player.
  *
  * Parameters:
  * None.
@@ -20,18 +20,22 @@
  * The firmware main loop does not return.
  *
  * Side effects:
- * Configures timing hardware, USART1, SPI2, GPIOB, and the ST7789 display.
+ * Configures timing hardware, GPIOA keys, SPI2, GPIOB, and ST7789.
  */
 int main(void)
 {
     delay_init();
     Timing_Init();
-    uart_init(115200);
     ST7789_Init();
-    App_ST7789_AnimInit();
+    Key_Init();
+    App_UI_Init();
 
     while (1)
     {
-        App_ST7789_AnimTask();
+        uint32_t now;
+
+        now = Timing_GetTick();
+        Key_Task(now);
+        App_UI_Task(now);
     }
 }
