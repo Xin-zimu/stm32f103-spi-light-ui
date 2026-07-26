@@ -475,26 +475,6 @@
               <FilePath>..\User\bsp_st7789.h</FilePath>
             </File>
             <File>
-              <FileName>anim_frames.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\User\anim_frames.c</FilePath>
-            </File>
-            <File>
-              <FileName>anim_frames.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\User\anim_frames.h</FilePath>
-            </File>
-            <File>
-              <FileName>app_st7789_anim.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\User\app_st7789_anim.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_st7789_anim.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\User\app_st7789_anim.h</FilePath>
-            </File>
-            <File>
               <FileName>key_driver.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\key_driver.c</FilePath>
