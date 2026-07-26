@@ -1,5 +1,7 @@
 #include "page_settings.h"
+#include "ui_anim.h"
 #include "ui_draw.h"
+#include "ui_feedback.h"
 
 #define PAGE_SETTINGS_ITEM_COUNT   3U      // Animation, brightness, and theme.
 #define PAGE_SETTINGS_ROW_Y0      46       // First large setting row top.
@@ -16,6 +18,8 @@ static uint8_t g_settings_selected = 0U;
 static uint8_t g_settings_animation = 1U;
 static uint8_t g_settings_brightness = 3U;
 static uint8_t g_settings_theme = 0U;
+static UI_FocusAnim g_settings_focus_anim;
+static uint32_t g_settings_draw_now = 0U;
 
 /*
  * Build the repaint rectangle for one settings row.
@@ -62,10 +66,27 @@ static void Page_Settings_InvalidateRow(uint8_t index)
 }
 
 /*
+ * Mark a settings focus animation rectangle dirty.
+ *
+ * Parameters:
+ * dirty: Rectangle produced by the focus animation task.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Queues local repaint for the animated marker.
+ */
+static void Page_Settings_InvalidateAnim(const UI_Rect *dirty)
+{
+    UI_PageInvalidate(dirty);
+}
+
+/*
  * Enter the settings page.
  *
  * Parameters:
- * None.
+ * now: Timestamp of the key event that requested the change.
  *
  * Return value:
  * None.
@@ -75,6 +96,10 @@ static void Page_Settings_InvalidateRow(uint8_t index)
  */
 static void Page_Settings_OnEnter(void)
 {
+    UI_Rect rect;
+
+    rect = Page_Settings_GetRowRect(g_settings_selected);
+    UI_FocusAnimInit(&g_settings_focus_anim, rect.y);
 }
 
 /*
@@ -89,8 +114,10 @@ static void Page_Settings_OnEnter(void)
  * Side effects:
  * Updates one RAM setting and requests a local row repaint.
  */
-static void Page_Settings_ChangeValue(void)
+static void Page_Settings_ChangeValue(uint32_t now)
 {
+    UI_Rect rect;
+
     if (g_settings_selected == 0U)
     {
         g_settings_animation ^= 1U;
@@ -111,6 +138,9 @@ static void Page_Settings_ChangeValue(void)
             g_settings_theme = 0U;
         }
     }
+
+    rect = Page_Settings_GetRowRect(g_settings_selected);
+    UI_FeedbackPress(&rect, now);
     Page_Settings_InvalidateRow(g_settings_selected);
 }
 
@@ -129,24 +159,32 @@ static void Page_Settings_ChangeValue(void)
 static void Page_Settings_OnEvent(const UI_Event *event)
 {
     uint8_t old_selected;
+    UI_Rect old_rect;
+    UI_Rect new_rect;
 
     if (event->type == UI_EVENT_UP)
     {
         old_selected = g_settings_selected;
+        old_rect = Page_Settings_GetRowRect(old_selected);
         g_settings_selected = (g_settings_selected == 0U) ?
             (PAGE_SETTINGS_ITEM_COUNT - 1U) :
             (uint8_t)(g_settings_selected - 1U);
+        new_rect = Page_Settings_GetRowRect(g_settings_selected);
+        UI_FocusAnimStart(&g_settings_focus_anim, old_rect.y, new_rect.y, event->timestamp);
         Page_Settings_InvalidateRow(old_selected);
         Page_Settings_InvalidateRow(g_settings_selected);
     }
     else if (event->type == UI_EVENT_DOWN)
     {
         old_selected = g_settings_selected;
+        old_rect = Page_Settings_GetRowRect(old_selected);
         g_settings_selected++;
         if (g_settings_selected >= PAGE_SETTINGS_ITEM_COUNT)
         {
             g_settings_selected = 0U;
         }
+        new_rect = Page_Settings_GetRowRect(g_settings_selected);
+        UI_FocusAnimStart(&g_settings_focus_anim, old_rect.y, new_rect.y, event->timestamp);
         Page_Settings_InvalidateRow(old_selected);
         Page_Settings_InvalidateRow(g_settings_selected);
     }
@@ -156,7 +194,30 @@ static void Page_Settings_OnEvent(const UI_Event *event)
     }
     else if ((event->type == UI_EVENT_RIGHT) || (event->type == UI_EVENT_OK))
     {
-        Page_Settings_ChangeValue();
+        Page_Settings_ChangeValue(event->timestamp);
+    }
+}
+
+/*
+ * Run settings page animation work.
+ *
+ * Parameters:
+ * now: Current system tick.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Advances focus animation and requests marker repaint.
+ */
+static void Page_Settings_Task(uint32_t now)
+{
+    UI_Rect dirty;
+
+    g_settings_draw_now = now;
+    if (UI_FocusAnimTask(&g_settings_focus_anim, now, &dirty) != 0U)
+    {
+        Page_Settings_InvalidateAnim(&dirty);
     }
 }
 
@@ -175,29 +236,36 @@ static void Page_Settings_OnEvent(const UI_Event *event)
 static void Page_Settings_Draw(const UI_Rect *clip)
 {
     static const char * const theme_names[3] = {"CYAN", "GOLD", "GREEN"};
+    UI_Rect row;
 
     (void)clip;
 
     UI_DrawStatusBar(TEXT_SETTINGS_TITLE, UI_COLOR_WARN);
-    UI_DrawMenuRowCN(
+    row = Page_Settings_GetRowRect(0U);
+    UI_DrawMenuRowCNEx(
         12,
-        PAGE_SETTINGS_ROW_Y0,
+        row.y,
         216,
         TEXT_ANIMATION,
         (g_settings_animation != 0U) ? TEXT_ON : TEXT_OFF,
-        (g_settings_selected == 0U) ? 1U : 0U
+        (g_settings_selected == 0U) ? 1U : 0U,
+        UI_FeedbackIsActive(&row, g_settings_draw_now)
     );
-    UI_DrawMenuRowCN(12, (int16_t)(PAGE_SETTINGS_ROW_Y0 + PAGE_SETTINGS_ROW_STEP), 216, TEXT_BRIGHTNESS, 0, (g_settings_selected == 1U) ? 1U : 0U);
+    row = Page_Settings_GetRowRect(1U);
+    UI_DrawMenuRowCNEx(12, row.y, 216, TEXT_BRIGHTNESS, 0, (g_settings_selected == 1U) ? 1U : 0U, UI_FeedbackIsActive(&row, g_settings_draw_now));
     UI_DrawProgressBar(128, 116, 78, g_settings_brightness, 5U);
-    UI_DrawMenuRowCN(
+    row = Page_Settings_GetRowRect(2U);
+    UI_DrawMenuRowCNEx(
         12,
-        (int16_t)(PAGE_SETTINGS_ROW_Y0 + (PAGE_SETTINGS_ROW_STEP * 2)),
+        row.y,
         216,
         TEXT_THEME,
         theme_names[g_settings_theme],
-        (g_settings_selected == 2U) ? 1U : 0U
+        (g_settings_selected == 2U) ? 1U : 0U,
+        UI_FeedbackIsActive(&row, g_settings_draw_now)
     );
     UI_DrawToggle(188, 63, g_settings_animation);
+    UI_DrawFocusMarker(12, UI_FocusAnimGetY(&g_settings_focus_anim), (int16_t)UI_ROW_H, UI_COLOR_ACCENT);
     UI_DrawFooter(TEXT_FOOTER_SETTINGS);
 }
 
@@ -205,5 +273,6 @@ const UI_PageOps PAGE_SETTINGS_OPS =
 {
     Page_Settings_OnEnter,
     Page_Settings_OnEvent,
+    Page_Settings_Task,
     Page_Settings_Draw
 };

@@ -255,6 +255,37 @@ void UI_DirtyAddXYWH(int16_t x, int16_t y, int16_t w, int16_t h)
 }
 
 /*
+ * Add the union of two rectangles as one dirty area.
+ *
+ * Animation repaint often needs to cover the previous and current marker
+ * positions together. Adding their union avoids fragmented ST7789 windows and
+ * keeps the repaint visually coherent.
+ *
+ * Parameters:
+ * a: First rectangle.
+ * b: Second rectangle.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Adds one clipped union rectangle to the dirty list.
+ */
+void UI_DirtyAddUnion(const UI_Rect *a, const UI_Rect *b)
+{
+    UI_Rect merged;
+
+    if ((a == 0) || (b == 0))
+    {
+        return;
+    }
+
+    merged = *a;
+    UI_DirtyUnionInto(&merged, b);
+    UI_DirtyAdd(&merged);
+}
+
+/*
  * Queue a full-screen repaint.
  *
  * Parameters:

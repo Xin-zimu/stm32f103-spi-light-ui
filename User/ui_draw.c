@@ -542,19 +542,73 @@ void UI_DrawMenuRowCN(
     uint8_t selected
 )
 {
+    UI_DrawMenuRowCNEx(x, y, w, label, value, selected, 0U);
+}
+
+/*
+ * Draw a large Chinese menu or setting row with optional pressed feedback.
+ *
+ * Parameters:
+ * x: Left coordinate.
+ * y: Top coordinate.
+ * w: Row width.
+ * label: GB2312 left label text.
+ * value: Optional GB2312 or ASCII right value text.
+ * selected: Nonzero when focused.
+ * pressed: Nonzero while short press feedback is visible.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Draws a complete large row control.
+ */
+void UI_DrawMenuRowCNEx(
+    int16_t x,
+    int16_t y,
+    int16_t w,
+    const char *label,
+    const char *value,
+    uint8_t selected,
+    uint8_t pressed
+)
+{
     uint16_t fill;
     uint16_t text;
 
     fill = (selected != 0U) ? UI_COLOR_SELECTED : UI_COLOR_SURFACE;
+    if (pressed != 0U)
+    {
+        fill = (selected != 0U) ? UI_COLOR_WARN : UI_COLOR_SURFACE_2;
+    }
     text = (selected != 0U) ? UI_COLOR_BG : UI_COLOR_TEXT;
     UI_DrawRect(x, y, w, (int16_t)UI_ROW_H, fill);
-    UI_DrawRect(x, y, 5, (int16_t)UI_ROW_H, UI_COLOR_ACCENT);
     UI_DrawRect(x, (int16_t)(y + UI_ROW_H - 1U), w, 1, UI_COLOR_DIM);
     UI_DrawTextCN((int16_t)(x + 16), (int16_t)(y + 16), label, text);
     if (value != 0)
     {
         UI_DrawTextCN((int16_t)(x + w - 54), (int16_t)(y + 16), value, text);
     }
+}
+
+/*
+ * Draw a slim animated focus marker beside a menu row.
+ *
+ * Parameters:
+ * x: Left coordinate.
+ * y: Marker top coordinate.
+ * h: Marker height in pixels.
+ * color: RGB565 marker color.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Draws the focus marker through the clipped rectangle primitive.
+ */
+void UI_DrawFocusMarker(int16_t x, int16_t y, int16_t h, uint16_t color)
+{
+    UI_DrawRect(x, (int16_t)(y + 6), 5, (int16_t)(h - 12), color);
 }
 
 /*

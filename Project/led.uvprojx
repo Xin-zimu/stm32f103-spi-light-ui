@@ -510,6 +510,26 @@
               <FilePath>..\User\ui_dirty.h</FilePath>
             </File>
             <File>
+              <FileName>ui_anim.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\ui_anim.c</FilePath>
+            </File>
+            <File>
+              <FileName>ui_anim.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\ui_anim.h</FilePath>
+            </File>
+            <File>
+              <FileName>ui_feedback.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\ui_feedback.c</FilePath>
+            </File>
+            <File>
+              <FileName>ui_feedback.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\ui_feedback.h</FilePath>
+            </File>
+            <File>
               <FileName>ui_font.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\ui_font.c</FilePath>

@@ -5,6 +5,7 @@
 #include "page_settings.h"
 #include "ui_dirty.h"
 #include "ui_draw.h"
+#include "ui_feedback.h"
 
 static const UI_PageOps * const UI_PAGES[UI_PAGE_COUNT] =
 {
@@ -31,6 +32,7 @@ static UI_PageId g_ui_current_page = UI_PAGE_HOME;
 void UI_PageInit(void)
 {
     UI_DirtyInit();
+    UI_FeedbackInit();
     g_ui_current_page = UI_PAGE_HOME;
     if (UI_PAGES[g_ui_current_page]->on_enter != 0)
     {
@@ -113,6 +115,7 @@ void UI_PageGoto(UI_PageId page)
     }
 
     g_ui_current_page = page;
+    UI_FeedbackInit();
     if (UI_PAGES[g_ui_current_page]->on_enter != 0)
     {
         UI_PAGES[g_ui_current_page]->on_enter();
@@ -246,7 +249,11 @@ void UI_PageTask(uint32_t now)
 {
     UI_Rect dirty;
 
-    (void)now;
+    UI_FeedbackTask(now);
+    if (UI_PAGES[g_ui_current_page]->task != 0)
+    {
+        UI_PAGES[g_ui_current_page]->task(now);
+    }
 
     if (UI_DirtyPop(&dirty) == 0U)
     {

@@ -95,5 +95,6 @@ const UI_PageOps PAGE_INFO_OPS =
 {
     Page_Info_OnEnter,
     Page_Info_OnEvent,
+    0,
     Page_Info_Draw
 };

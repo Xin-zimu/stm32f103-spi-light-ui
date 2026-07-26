@@ -1,5 +1,7 @@
 #include "page_home.h"
+#include "ui_anim.h"
 #include "ui_draw.h"
+#include "ui_feedback.h"
 
 #define PAGE_HOME_ITEM_COUNT       3U      // Player, settings, and info.
 #define PAGE_HOME_ROW_Y0          46       // First large menu row top.
@@ -12,6 +14,8 @@
 #define TEXT_FOOTER_HOME          "\xC9\xCF\xCF\xC2\xD1\xA1\xD4\xF1  \xC8\xB7\xC8\xCF\xBD\xF8\xC8\xEB"
 
 static uint8_t g_home_selected = 0U;
+static UI_FocusAnim g_home_focus_anim;
+static uint32_t g_home_draw_now = 0U;
 
 /*
  * Build the repaint rectangle for one home menu row.
@@ -58,6 +62,23 @@ static void Page_Home_InvalidateRow(uint8_t index)
 }
 
 /*
+ * Mark a focus animation rectangle dirty.
+ *
+ * Parameters:
+ * dirty: Rectangle produced by the focus animation task.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Queues local repaint for the animated marker.
+ */
+static void Page_Home_InvalidateAnim(const UI_Rect *dirty)
+{
+    UI_PageInvalidate(dirty);
+}
+
+/*
  * Enter the home page.
  *
  * Parameters:
@@ -71,6 +92,10 @@ static void Page_Home_InvalidateRow(uint8_t index)
  */
 static void Page_Home_OnEnter(void)
 {
+    UI_Rect rect;
+
+    rect = Page_Home_GetRowRect(g_home_selected);
+    UI_FocusAnimInit(&g_home_focus_anim, rect.y);
 }
 
 /*
@@ -116,24 +141,32 @@ static void Page_Home_EnterSelected(void)
 static void Page_Home_OnEvent(const UI_Event *event)
 {
     uint8_t old_selected;
+    UI_Rect old_rect;
+    UI_Rect new_rect;
 
     if (event->type == UI_EVENT_UP)
     {
         old_selected = g_home_selected;
+        old_rect = Page_Home_GetRowRect(old_selected);
         g_home_selected = (g_home_selected == 0U) ?
             (PAGE_HOME_ITEM_COUNT - 1U) :
             (uint8_t)(g_home_selected - 1U);
+        new_rect = Page_Home_GetRowRect(g_home_selected);
+        UI_FocusAnimStart(&g_home_focus_anim, old_rect.y, new_rect.y, event->timestamp);
         Page_Home_InvalidateRow(old_selected);
         Page_Home_InvalidateRow(g_home_selected);
     }
     else if (event->type == UI_EVENT_DOWN)
     {
         old_selected = g_home_selected;
+        old_rect = Page_Home_GetRowRect(old_selected);
         g_home_selected++;
         if (g_home_selected >= PAGE_HOME_ITEM_COUNT)
         {
             g_home_selected = 0U;
         }
+        new_rect = Page_Home_GetRowRect(g_home_selected);
+        UI_FocusAnimStart(&g_home_focus_anim, old_rect.y, new_rect.y, event->timestamp);
         Page_Home_InvalidateRow(old_selected);
         Page_Home_InvalidateRow(g_home_selected);
     }
@@ -144,9 +177,35 @@ static void Page_Home_OnEvent(const UI_Event *event)
     else if (event->type == UI_EVENT_LEFT)
     {
         old_selected = g_home_selected;
+        old_rect = Page_Home_GetRowRect(old_selected);
         g_home_selected = 0U;
+        new_rect = Page_Home_GetRowRect(g_home_selected);
+        UI_FocusAnimStart(&g_home_focus_anim, old_rect.y, new_rect.y, event->timestamp);
         Page_Home_InvalidateRow(old_selected);
         Page_Home_InvalidateRow(g_home_selected);
+    }
+}
+
+/*
+ * Run home page animation work.
+ *
+ * Parameters:
+ * now: Current system tick.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Advances focus animation and requests marker repaint.
+ */
+static void Page_Home_Task(uint32_t now)
+{
+    UI_Rect dirty;
+
+    g_home_draw_now = now;
+    if (UI_FocusAnimTask(&g_home_focus_anim, now, &dirty) != 0U)
+    {
+        Page_Home_InvalidateAnim(&dirty);
     }
 }
 
@@ -164,12 +223,18 @@ static void Page_Home_OnEvent(const UI_Event *event)
  */
 static void Page_Home_Draw(const UI_Rect *clip)
 {
+    UI_Rect row;
+
     (void)clip;
 
     UI_DrawStatusBar(TEXT_HOME_TITLE, UI_COLOR_ACCENT);
-    UI_DrawMenuRowCN(12, PAGE_HOME_ROW_Y0, 216, TEXT_PLAYER, ">", (g_home_selected == 0U) ? 1U : 0U);
-    UI_DrawMenuRowCN(12, (int16_t)(PAGE_HOME_ROW_Y0 + PAGE_HOME_ROW_STEP), 216, TEXT_SETTINGS, ">", (g_home_selected == 1U) ? 1U : 0U);
-    UI_DrawMenuRowCN(12, (int16_t)(PAGE_HOME_ROW_Y0 + (PAGE_HOME_ROW_STEP * 2)), 216, TEXT_INFO, ">", (g_home_selected == 2U) ? 1U : 0U);
+    row = Page_Home_GetRowRect(0U);
+    UI_DrawMenuRowCNEx(12, row.y, 216, TEXT_PLAYER, ">", (g_home_selected == 0U) ? 1U : 0U, UI_FeedbackIsActive(&row, g_home_draw_now));
+    row = Page_Home_GetRowRect(1U);
+    UI_DrawMenuRowCNEx(12, row.y, 216, TEXT_SETTINGS, ">", (g_home_selected == 1U) ? 1U : 0U, UI_FeedbackIsActive(&row, g_home_draw_now));
+    row = Page_Home_GetRowRect(2U);
+    UI_DrawMenuRowCNEx(12, row.y, 216, TEXT_INFO, ">", (g_home_selected == 2U) ? 1U : 0U, UI_FeedbackIsActive(&row, g_home_draw_now));
+    UI_DrawFocusMarker(12, UI_FocusAnimGetY(&g_home_focus_anim), (int16_t)UI_ROW_H, UI_COLOR_ACCENT);
     UI_DrawFooter(TEXT_FOOTER_HOME);
 }
 
@@ -177,5 +242,6 @@ const UI_PageOps PAGE_HOME_OPS =
 {
     Page_Home_OnEnter,
     Page_Home_OnEvent,
+    Page_Home_Task,
     Page_Home_Draw
 };

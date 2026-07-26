@@ -8,6 +8,7 @@ typedef struct
 {
     void (*on_enter)(void);                // Called when the page becomes active.
     void (*on_event)(const UI_Event *event); // Called for non-global events.
+    void (*task)(uint32_t now);            // Optional periodic page work.
     void (*draw)(const UI_Rect *clip);     // Draws content intersecting clip.
 } UI_PageOps;
 

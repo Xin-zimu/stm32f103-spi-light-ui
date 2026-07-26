@@ -135,5 +135,6 @@ const UI_PageOps PAGE_PLAYER_OPS =
 {
     Page_Player_OnEnter,
     Page_Player_OnEvent,
+    0,
     Page_Player_Draw
 };
