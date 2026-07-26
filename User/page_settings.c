@@ -28,7 +28,7 @@ static void Page_Settings_OnEnter(void)
  * Change the currently focused setting.
  *
  * Parameters:
- * delta_positive: Nonzero for RIGHT/MID style increment, zero for LEFT.
+ * None.
  *
  * Return value:
  * None.
@@ -36,7 +36,7 @@ static void Page_Settings_OnEnter(void)
  * Side effects:
  * Updates one RAM setting and requests redraw.
  */
-static void Page_Settings_ChangeValue(uint8_t delta_positive)
+static void Page_Settings_ChangeValue(void)
 {
     if (g_settings_selected == 0U)
     {
@@ -44,17 +44,10 @@ static void Page_Settings_ChangeValue(uint8_t delta_positive)
     }
     else if (g_settings_selected == 1U)
     {
-        if (delta_positive != 0U)
+        g_settings_brightness++;
+        if (g_settings_brightness > 5U)
         {
-            g_settings_brightness++;
-            if (g_settings_brightness > 5U)
-            {
-                g_settings_brightness = 1U;
-            }
-        }
-        else if (g_settings_brightness > 1U)
-        {
-            g_settings_brightness--;
+            g_settings_brightness = 1U;
         }
     }
     else
@@ -100,11 +93,11 @@ static void Page_Settings_OnEvent(const UI_Event *event)
     }
     else if (event->type == UI_EVENT_LEFT)
     {
-        Page_Settings_ChangeValue(0U);
+        UI_PageBack();
     }
     else if ((event->type == UI_EVENT_RIGHT) || (event->type == UI_EVENT_OK))
     {
-        Page_Settings_ChangeValue(1U);
+        Page_Settings_ChangeValue();
     }
 }
 
@@ -145,7 +138,7 @@ static void Page_Settings_Draw(void)
         (g_settings_selected == 2U) ? 1U : 0U
     );
     UI_DrawToggle(188, 55, g_settings_animation);
-    UI_DrawFooter("LEFT/RIGHT CHANGE");
+    UI_DrawFooter("RIGHT CHANGE LEFT BACK");
 }
 
 const UI_PageOps PAGE_SETTINGS_OPS =
