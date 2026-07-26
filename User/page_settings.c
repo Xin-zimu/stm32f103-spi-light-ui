@@ -2,6 +2,15 @@
 #include "ui_draw.h"
 
 #define PAGE_SETTINGS_ITEM_COUNT   3U      // Animation, brightness, and theme.
+#define PAGE_SETTINGS_ROW_Y0      46       // First large setting row top.
+#define PAGE_SETTINGS_ROW_STEP    54       // Distance between large setting rows.
+#define TEXT_SETTINGS_TITLE       "\xC9\xE8\xD6\xC3"
+#define TEXT_ANIMATION            "\xB6\xAF\xBB\xAD"
+#define TEXT_BRIGHTNESS           "\xC1\xC1\xB6\xC8"
+#define TEXT_THEME                "\xD6\xF7\xCC\xE2"
+#define TEXT_ON                   "\xBF\xAA"
+#define TEXT_OFF                  "\xB9\xD8"
+#define TEXT_FOOTER_SETTINGS      "\xC8\xB7\xC8\xCF\xBD\xF8\xC8\xEB  \xD7\xF3\xBC\xFC\xB7\xB5\xBB\xD8"
 
 static uint8_t g_settings_selected = 0U;
 static uint8_t g_settings_animation = 1U;
@@ -25,7 +34,7 @@ static UI_Rect Page_Settings_GetRowRect(uint8_t index)
     UI_Rect rect;
 
     rect.x = 12;
-    rect.y = (int16_t)(44 + ((int16_t)index * 44));
+    rect.y = (int16_t)(PAGE_SETTINGS_ROW_Y0 + ((int16_t)index * PAGE_SETTINGS_ROW_STEP));
     rect.w = 216;
     rect.h = (int16_t)UI_ROW_H;
 
@@ -169,27 +178,27 @@ static void Page_Settings_Draw(const UI_Rect *clip)
 
     (void)clip;
 
-    UI_DrawStatusBar("SETTINGS", UI_COLOR_WARN);
-    UI_DrawMenuRow(
+    UI_DrawStatusBar(TEXT_SETTINGS_TITLE, UI_COLOR_WARN);
+    UI_DrawMenuRowCN(
         12,
-        44,
+        PAGE_SETTINGS_ROW_Y0,
         216,
-        "ANIMATION",
-        (g_settings_animation != 0U) ? "ON" : "OFF",
+        TEXT_ANIMATION,
+        (g_settings_animation != 0U) ? TEXT_ON : TEXT_OFF,
         (g_settings_selected == 0U) ? 1U : 0U
     );
-    UI_DrawMenuRow(12, 88, 216, "BRIGHT", 0, (g_settings_selected == 1U) ? 1U : 0U);
-    UI_DrawProgressBar(128, 101, 78, g_settings_brightness, 5U);
-    UI_DrawMenuRow(
+    UI_DrawMenuRowCN(12, (int16_t)(PAGE_SETTINGS_ROW_Y0 + PAGE_SETTINGS_ROW_STEP), 216, TEXT_BRIGHTNESS, 0, (g_settings_selected == 1U) ? 1U : 0U);
+    UI_DrawProgressBar(128, 116, 78, g_settings_brightness, 5U);
+    UI_DrawMenuRowCN(
         12,
-        132,
+        (int16_t)(PAGE_SETTINGS_ROW_Y0 + (PAGE_SETTINGS_ROW_STEP * 2)),
         216,
-        "THEME",
+        TEXT_THEME,
         theme_names[g_settings_theme],
         (g_settings_selected == 2U) ? 1U : 0U
     );
-    UI_DrawToggle(188, 55, g_settings_animation);
-    UI_DrawFooter("RIGHT CHANGE LEFT BACK");
+    UI_DrawToggle(188, 63, g_settings_animation);
+    UI_DrawFooter(TEXT_FOOTER_SETTINGS);
 }
 
 const UI_PageOps PAGE_SETTINGS_OPS =

@@ -220,6 +220,101 @@ static void UI_DrawChar(int16_t x, int16_t y, char ch, uint16_t color)
 }
 
 /*
+ * Draw one large ASCII character.
+ *
+ * The large renderer reuses the compact 5x7 glyph table and scales every lit
+ * pixel to a 2x2 block. It gives readable numbers and hardware identifiers
+ * without adding another full ASCII bitmap table to Flash.
+ *
+ * Parameters:
+ * x: Left coordinate.
+ * y: Top coordinate.
+ * ch: ASCII character.
+ * color: RGB565 foreground color.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Draws scaled glyph pixels through the clipped rectangle primitive.
+ */
+static void UI_DrawCharLarge(int16_t x, int16_t y, char ch, uint16_t color)
+{
+    const uint8_t *glyph;
+    uint8_t column;
+    uint8_t row;
+
+    glyph = UI_FontGetGlyph(ch);
+    for (column = 0U; column < 5U; column++)
+    {
+        for (row = 0U; row < 7U; row++)
+        {
+            if ((glyph[column] & (uint8_t)(1U << row)) != 0U)
+            {
+                UI_DrawRect(
+                    (int16_t)(x + 1 + ((int16_t)column * 2)),
+                    (int16_t)(y + 2 + ((int16_t)row * 2)),
+                    2,
+                    2,
+                    color
+                );
+            }
+        }
+    }
+}
+
+/*
+ * Draw one 16x16 GB2312 Chinese glyph.
+ *
+ * Parameters:
+ * x: Left coordinate.
+ * y: Top coordinate.
+ * gb2312_code: Two-byte GB2312 code packed as high byte then low byte.
+ * color: RGB565 foreground color.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Draws glyph pixels through the clipped rectangle primitive.
+ */
+static void UI_DrawChineseChar(int16_t x, int16_t y, uint16_t gb2312_code, uint16_t color)
+{
+    const uint8_t *glyph;
+    uint8_t row;
+    uint8_t col;
+    uint8_t byte_value;
+
+    glyph = UI_FontGetChineseGlyph(gb2312_code);
+    if (glyph == 0)
+    {
+        UI_DrawFrame(x, y, (int16_t)UI_FONT_CN_WIDTH, (int16_t)UI_FONT_CN_HEIGHT, UI_COLOR_DANGER);
+        return;
+    }
+
+    for (row = 0U; row < UI_FONT_CN_HEIGHT; row++)
+    {
+        byte_value = glyph[(uint8_t)(row * 2U)];
+        for (col = 0U; col < 8U; col++)
+        {
+            if ((byte_value & (uint8_t)(0x80U >> col)) != 0U)
+            {
+                UI_DrawRect((int16_t)(x + col), (int16_t)(y + row), 1, 1, color);
+            }
+        }
+
+        byte_value = glyph[(uint8_t)((row * 2U) + 1U)];
+        for (col = 0U; col < 8U; col++)
+        {
+            if ((byte_value & (uint8_t)(0x80U >> col)) != 0U)
+            {
+                UI_DrawRect((int16_t)(x + 8 + col), (int16_t)(y + row), 1, 1, color);
+            }
+        }
+    }
+}
+
+/*
  * Draw a null-terminated ASCII string.
  *
  * Parameters:
@@ -251,6 +346,93 @@ void UI_DrawText(int16_t x, int16_t y, const char *text, uint16_t color)
 }
 
 /*
+ * Draw a large ASCII string.
+ *
+ * Parameters:
+ * x: Left coordinate.
+ * y: Top coordinate.
+ * text: Null-terminated ASCII text.
+ * color: RGB565 text color.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Draws scaled ASCII text on the ST7789.
+ */
+void UI_DrawTextLarge(int16_t x, int16_t y, const char *text, uint16_t color)
+{
+    while ((text != 0) && (*text != '\0') && (x < (int16_t)UI_SCREEN_W))
+    {
+        if (((x + (int16_t)UI_FONT_LARGE_WIDTH) > g_ui_draw_clip.x) &&
+            (x < (g_ui_draw_clip.x + g_ui_draw_clip.w)) &&
+            ((y + (int16_t)UI_FONT_LARGE_HEIGHT) > g_ui_draw_clip.y) &&
+            (y < (g_ui_draw_clip.y + g_ui_draw_clip.h)))
+        {
+            UI_DrawCharLarge(x, y, *text, color);
+        }
+        x = (int16_t)(x + (int16_t)UI_FONT_LARGE_WIDTH);
+        text++;
+    }
+}
+
+/*
+ * Draw mixed GB2312 Chinese and ASCII text.
+ *
+ * Text literals are stored as GB2312 byte sequences. Two bytes with the high
+ * bit set are looked up in the Chinese subset table; ASCII bytes are drawn
+ * with the large scaled font so model names and values remain readable.
+ *
+ * Parameters:
+ * x: Left coordinate.
+ * y: Top coordinate.
+ * text: Null-terminated GB2312 or ASCII text.
+ * color: RGB565 text color.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Draws mixed text on the ST7789.
+ */
+void UI_DrawTextCN(int16_t x, int16_t y, const char *text, uint16_t color)
+{
+    const uint8_t *cursor;
+    uint16_t code;
+
+    cursor = (const uint8_t *)text;
+    while ((cursor != 0) && (*cursor != 0U) && (x < (int16_t)UI_SCREEN_W))
+    {
+        if ((*cursor >= 0x80U) && (cursor[1] != 0U))
+        {
+            code = (uint16_t)(((uint16_t)cursor[0] << 8) | cursor[1]);
+            if (((x + (int16_t)UI_FONT_CN_WIDTH) > g_ui_draw_clip.x) &&
+                (x < (g_ui_draw_clip.x + g_ui_draw_clip.w)) &&
+                ((y + (int16_t)UI_FONT_CN_HEIGHT) > g_ui_draw_clip.y) &&
+                (y < (g_ui_draw_clip.y + g_ui_draw_clip.h)))
+            {
+                UI_DrawChineseChar(x, y, code, color);
+            }
+            x = (int16_t)(x + (int16_t)UI_FONT_CN_WIDTH);
+            cursor += 2;
+        }
+        else
+        {
+            if (*cursor == ' ')
+            {
+                x = (int16_t)(x + 8);
+            }
+            else
+            {
+                UI_DrawCharLarge(x, y, (char)*cursor, color);
+                x = (int16_t)(x + (int16_t)UI_FONT_LARGE_WIDTH);
+            }
+            cursor++;
+        }
+    }
+}
+
+/*
  * Draw the standard top status bar.
  *
  * Parameters:
@@ -266,8 +448,8 @@ void UI_DrawText(int16_t x, int16_t y, const char *text, uint16_t color)
 void UI_DrawStatusBar(const char *title, uint16_t accent_color)
 {
     UI_DrawRect(0, 0, (int16_t)UI_SCREEN_W, (int16_t)UI_STATUS_H, accent_color);
-    UI_DrawText((int16_t)UI_MARGIN, 6, title, UI_COLOR_BG);
-    UI_DrawRect(218, 7, 10, 10, UI_COLOR_BG);
+    UI_DrawTextCN((int16_t)UI_MARGIN, 8, title, UI_COLOR_BG);
+    UI_DrawRect(216, 10, 12, 12, UI_COLOR_BG);
 }
 
 /*
@@ -291,7 +473,7 @@ void UI_DrawFooter(const char *hint)
         (int16_t)UI_FOOTER_H,
         UI_COLOR_SURFACE
     );
-    UI_DrawText((int16_t)UI_MARGIN, 224, hint, UI_COLOR_MUTED);
+    UI_DrawTextCN((int16_t)UI_MARGIN, 218, hint, UI_COLOR_MUTED);
 }
 
 /*
@@ -332,6 +514,69 @@ void UI_DrawMenuRow(
     {
         UI_DrawText((int16_t)(x + w - 70), (int16_t)(y + 12), value, text);
     }
+}
+
+/*
+ * Draw a large Chinese menu or setting row.
+ *
+ * Parameters:
+ * x: Left coordinate.
+ * y: Top coordinate.
+ * w: Row width.
+ * label: GB2312 left label text.
+ * value: Optional GB2312 or ASCII right value text.
+ * selected: Nonzero when focused.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Draws a complete large row control.
+ */
+void UI_DrawMenuRowCN(
+    int16_t x,
+    int16_t y,
+    int16_t w,
+    const char *label,
+    const char *value,
+    uint8_t selected
+)
+{
+    uint16_t fill;
+    uint16_t text;
+
+    fill = (selected != 0U) ? UI_COLOR_SELECTED : UI_COLOR_SURFACE;
+    text = (selected != 0U) ? UI_COLOR_BG : UI_COLOR_TEXT;
+    UI_DrawRect(x, y, w, (int16_t)UI_ROW_H, fill);
+    UI_DrawRect(x, y, 5, (int16_t)UI_ROW_H, UI_COLOR_ACCENT);
+    UI_DrawRect(x, (int16_t)(y + UI_ROW_H - 1U), w, 1, UI_COLOR_DIM);
+    UI_DrawTextCN((int16_t)(x + 16), (int16_t)(y + 16), label, text);
+    if (value != 0)
+    {
+        UI_DrawTextCN((int16_t)(x + w - 54), (int16_t)(y + 16), value, text);
+    }
+}
+
+/*
+ * Draw one large information row.
+ *
+ * Parameters:
+ * y: Top coordinate.
+ * label: GB2312 left label.
+ * value: GB2312 or ASCII value text.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Draws one clipped information row.
+ */
+void UI_DrawInfoRowCN(int16_t y, const char *label, const char *value)
+{
+    UI_DrawRect(12, y, 216, 32, UI_COLOR_SURFACE);
+    UI_DrawRect(12, (int16_t)(y + 31), 216, 1, UI_COLOR_DIM);
+    UI_DrawTextCN(22, (int16_t)(y + 8), label, UI_COLOR_MUTED);
+    UI_DrawTextCN(92, (int16_t)(y + 8), value, UI_COLOR_TEXT);
 }
 
 /*

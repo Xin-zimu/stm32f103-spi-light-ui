@@ -1,6 +1,16 @@
 #include "page_info.h"
 #include "ui_draw.h"
 
+#define TEXT_INFO_TITLE        "\xCF\xB5\xCD\xB3\xD0\xC5\xCF\xA2"
+#define TEXT_MCU              "MCU"
+#define TEXT_LCD              "LCD"
+#define TEXT_KEY              "KEY"
+#define TEXT_GIF              "\xB6\xAF\xBB\xAD"
+#define TEXT_BUILD            "\xD7\xB4\xCC\xAC"
+#define TEXT_DISABLED         "\xBD\xFB\xD3\xC3\xD6\xD0"
+#define TEXT_UI_FIRST         "UI FIRST"
+#define TEXT_FOOTER_INFO      "\xD7\xF3\xBC\xFC\xB7\xB5\xBB\xD8  SET\xC9\xE8\xD6\xC3"
+
 /*
  * Enter the information page.
  *
@@ -53,9 +63,7 @@ static void Page_Info_OnEvent(const UI_Event *event)
  */
 static void Page_Info_DrawRow(int16_t y, const char *label, const char *value)
 {
-    UI_DrawRect(12, y, 216, 26, UI_COLOR_SURFACE);
-    UI_DrawText(22, (int16_t)(y + 8), label, UI_COLOR_MUTED);
-    UI_DrawText(88, (int16_t)(y + 8), value, UI_COLOR_TEXT);
+    UI_DrawInfoRowCN(y, label, value);
 }
 
 /*
@@ -74,13 +82,13 @@ static void Page_Info_Draw(const UI_Rect *clip)
 {
     (void)clip;
 
-    UI_DrawStatusBar("INFO", UI_COLOR_OK);
-    Page_Info_DrawRow(42, "MCU", "STM32F103C8");
-    Page_Info_DrawRow(72, "LCD", "ST7789 240");
-    Page_Info_DrawRow(102, "KEY", "PA0-PA6");
-    Page_Info_DrawRow(132, "GIF", "DISABLED");
-    Page_Info_DrawRow(162, "BUILD", "UI FIRST");
-    UI_DrawFooter("RST BACK SET MENU");
+    UI_DrawStatusBar(TEXT_INFO_TITLE, UI_COLOR_OK);
+    Page_Info_DrawRow(42, TEXT_MCU, "STM32F103C8");
+    Page_Info_DrawRow(76, TEXT_LCD, "ST7789");
+    Page_Info_DrawRow(110, TEXT_KEY, "PA0-PA6");
+    Page_Info_DrawRow(144, TEXT_GIF, TEXT_DISABLED);
+    Page_Info_DrawRow(178, TEXT_BUILD, TEXT_UI_FIRST);
+    UI_DrawFooter(TEXT_FOOTER_INFO);
 }
 
 const UI_PageOps PAGE_INFO_OPS =

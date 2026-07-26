@@ -5,17 +5,18 @@
 
 #define UI_SCREEN_W          240U     // ST7789 visible width.
 #define UI_SCREEN_H          240U     // ST7789 visible height.
-#define UI_STATUS_H           24U     // Top status bar height.
-#define UI_FOOTER_H           22U     // Bottom hint area height.
+#define UI_STATUS_H           32U     // Top status bar height.
+#define UI_FOOTER_H           28U     // Bottom hint area height.
 #define UI_MARGIN             12U     // Standard outer margin.
-#define UI_ROW_H              36U     // Standard row height.
-#define UI_ROW_GAP             8U     // Gap between rows.
+#define UI_ROW_H              48U     // Standard row height.
+#define UI_ROW_GAP             6U     // Gap between rows.
 
 #define UI_COLOR_BG        0x0841U    // Dark neutral background.
 #define UI_COLOR_SURFACE   0x2104U    // Primary surface color.
 #define UI_COLOR_SURFACE_2 0x3186U    // Secondary surface color.
 #define UI_COLOR_TEXT      0xFFFFU    // Primary text color.
 #define UI_COLOR_MUTED     0xA514U    // Muted text and hint color.
+#define UI_COLOR_DIM       0x632CU    // Low-emphasis divider color.
 #define UI_COLOR_ACCENT    0x07FFU    // Cyan accent color.
 #define UI_COLOR_SELECTED  0xFD20U    // Selected row color.
 #define UI_COLOR_OK        0x07E0U    // Success state color.

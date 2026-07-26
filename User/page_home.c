@@ -2,6 +2,14 @@
 #include "ui_draw.h"
 
 #define PAGE_HOME_ITEM_COUNT       3U      // Player, settings, and info.
+#define PAGE_HOME_ROW_Y0          46       // First large menu row top.
+#define PAGE_HOME_ROW_STEP        54       // Distance between large menu rows.
+#define TEXT_HOME_TITLE           "\xD6\xF7\xD2\xB3"
+#define TEXT_PLAYER               "\xB6\xAF\xBB\xAD\xB2\xA5\xB7\xC5\xC6\xF7"
+#define TEXT_SETTINGS             "\xC9\xE8\xD6\xC3"
+#define TEXT_INFO                 "\xCF\xB5\xCD\xB3\xD0\xC5\xCF\xA2"
+#define TEXT_CONFIRM              "\xC8\xB7\xC8\xCF"
+#define TEXT_FOOTER_HOME          "\xC9\xCF\xCF\xC2\xD1\xA1\xD4\xF1  \xC8\xB7\xC8\xCF\xBD\xF8\xC8\xEB"
 
 static uint8_t g_home_selected = 0U;
 
@@ -22,7 +30,7 @@ static UI_Rect Page_Home_GetRowRect(uint8_t index)
     UI_Rect rect;
 
     rect.x = 12;
-    rect.y = (int16_t)(44 + ((int16_t)index * 44));
+    rect.y = (int16_t)(PAGE_HOME_ROW_Y0 + ((int16_t)index * PAGE_HOME_ROW_STEP));
     rect.w = 216;
     rect.h = (int16_t)UI_ROW_H;
 
@@ -158,11 +166,11 @@ static void Page_Home_Draw(const UI_Rect *clip)
 {
     (void)clip;
 
-    UI_DrawStatusBar("UI HOME", UI_COLOR_ACCENT);
-    UI_DrawMenuRow(12, 44, 216, "PLAYER", "OFF", (g_home_selected == 0U) ? 1U : 0U);
-    UI_DrawMenuRow(12, 88, 216, "SETTINGS", 0, (g_home_selected == 1U) ? 1U : 0U);
-    UI_DrawMenuRow(12, 132, 216, "INFO", 0, (g_home_selected == 2U) ? 1U : 0U);
-    UI_DrawFooter("UP/DOWN MID OK");
+    UI_DrawStatusBar(TEXT_HOME_TITLE, UI_COLOR_ACCENT);
+    UI_DrawMenuRowCN(12, PAGE_HOME_ROW_Y0, 216, TEXT_PLAYER, ">", (g_home_selected == 0U) ? 1U : 0U);
+    UI_DrawMenuRowCN(12, (int16_t)(PAGE_HOME_ROW_Y0 + PAGE_HOME_ROW_STEP), 216, TEXT_SETTINGS, ">", (g_home_selected == 1U) ? 1U : 0U);
+    UI_DrawMenuRowCN(12, (int16_t)(PAGE_HOME_ROW_Y0 + (PAGE_HOME_ROW_STEP * 2)), 216, TEXT_INFO, ">", (g_home_selected == 2U) ? 1U : 0U);
+    UI_DrawFooter(TEXT_FOOTER_HOME);
 }
 
 const UI_PageOps PAGE_HOME_OPS =

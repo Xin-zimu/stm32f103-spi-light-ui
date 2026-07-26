@@ -1,6 +1,14 @@
 #include "page_player.h"
 #include "ui_draw.h"
 
+#define TEXT_PLAYER_TITLE       "\xB2\xA5\xB7\xC5"
+#define TEXT_GIF_DISABLED      "GIF \xBD\xFB\xD3\xC3\xD6\xD0"
+#define TEXT_STATE             "\xD7\xB4\xCC\xAC"
+#define TEXT_PLAYING           "\xB2\xA5\xB7\xC5"
+#define TEXT_PAUSED            "\xD4\xDD\xCD\xA3"
+#define TEXT_STOPPED           "\xCD\xA3\xD6\xB9"
+#define TEXT_FOOTER_PLAYER     "\xC8\xB7\xC8\xCF\xB2\xA5\xB7\xC5  \xD7\xF3\xBC\xFC\xB7\xB5\xBB\xD8"
+
 typedef enum
 {
     PLAYER_STATE_STOPPED = 0,             // Placeholder is stopped.
@@ -25,7 +33,7 @@ static uint8_t g_player_progress = 0U;
  */
 static void Page_Player_InvalidateState(void)
 {
-    UI_PageInvalidateXYWH(30, 160, 180, 40);
+    UI_PageInvalidateXYWH(24, 158, 192, 44);
 }
 
 /*
@@ -102,25 +110,25 @@ static void Page_Player_Draw(const UI_Rect *clip)
 
     (void)clip;
 
-    state_text = "STOPPED";
+    state_text = TEXT_STOPPED;
     if (g_player_state == PLAYER_STATE_PLAYING)
     {
-        state_text = "PLAYING";
+        state_text = TEXT_PLAYING;
         g_player_progress = 36U;
     }
     else if (g_player_state == PLAYER_STATE_PAUSED)
     {
-        state_text = "PAUSED";
+        state_text = TEXT_PAUSED;
     }
 
-    UI_DrawStatusBar("PLAYER", UI_COLOR_ACCENT);
-    UI_DrawRect(18, 42, 204, 112, UI_COLOR_SURFACE);
-    UI_DrawFrame(34, 58, 172, 64, UI_COLOR_MUTED);
-    UI_DrawText(56, 84, "GIF DISABLED", UI_COLOR_WARN);
-    UI_DrawText(30, 164, "STATE", UI_COLOR_MUTED);
-    UI_DrawText(92, 164, state_text, UI_COLOR_TEXT);
-    UI_DrawProgressBar(30, 188, 180, g_player_progress, 100U);
-    UI_DrawFooter("MID PLAY RIGHT RESET");
+    UI_DrawStatusBar(TEXT_PLAYER_TITLE, UI_COLOR_ACCENT);
+    UI_DrawRect(18, 44, 204, 104, UI_COLOR_SURFACE);
+    UI_DrawFrame(34, 60, 172, 56, UI_COLOR_MUTED);
+    UI_DrawTextCN(48, 80, TEXT_GIF_DISABLED, UI_COLOR_WARN);
+    UI_DrawTextCN(30, 164, TEXT_STATE, UI_COLOR_MUTED);
+    UI_DrawTextCN(94, 164, state_text, UI_COLOR_TEXT);
+    UI_DrawProgressBar(30, 190, 180, g_player_progress, 100U);
+    UI_DrawFooter(TEXT_FOOTER_PLAYER);
 }
 
 const UI_PageOps PAGE_PLAYER_OPS =
