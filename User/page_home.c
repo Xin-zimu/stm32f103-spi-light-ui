@@ -6,6 +6,50 @@
 static uint8_t g_home_selected = 0U;
 
 /*
+ * Build the repaint rectangle for one home menu row.
+ *
+ * Parameters:
+ * index: Menu item index.
+ *
+ * Return value:
+ * Rectangle covering the full row.
+ *
+ * Side effects:
+ * None.
+ */
+static UI_Rect Page_Home_GetRowRect(uint8_t index)
+{
+    UI_Rect rect;
+
+    rect.x = 12;
+    rect.y = (int16_t)(44 + ((int16_t)index * 44));
+    rect.w = 216;
+    rect.h = (int16_t)UI_ROW_H;
+
+    return rect;
+}
+
+/*
+ * Mark one home menu row dirty.
+ *
+ * Parameters:
+ * index: Menu item index.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Queues a local repaint for the row.
+ */
+static void Page_Home_InvalidateRow(uint8_t index)
+{
+    UI_Rect rect;
+
+    rect = Page_Home_GetRowRect(index);
+    UI_PageInvalidate(&rect);
+}
+
+/*
  * Enter the home page.
  *
  * Parameters:
@@ -63,21 +107,27 @@ static void Page_Home_EnterSelected(void)
  */
 static void Page_Home_OnEvent(const UI_Event *event)
 {
+    uint8_t old_selected;
+
     if (event->type == UI_EVENT_UP)
     {
+        old_selected = g_home_selected;
         g_home_selected = (g_home_selected == 0U) ?
             (PAGE_HOME_ITEM_COUNT - 1U) :
             (uint8_t)(g_home_selected - 1U);
-        UI_PageRequestRedraw();
+        Page_Home_InvalidateRow(old_selected);
+        Page_Home_InvalidateRow(g_home_selected);
     }
     else if (event->type == UI_EVENT_DOWN)
     {
+        old_selected = g_home_selected;
         g_home_selected++;
         if (g_home_selected >= PAGE_HOME_ITEM_COUNT)
         {
             g_home_selected = 0U;
         }
-        UI_PageRequestRedraw();
+        Page_Home_InvalidateRow(old_selected);
+        Page_Home_InvalidateRow(g_home_selected);
     }
     else if ((event->type == UI_EVENT_OK) || (event->type == UI_EVENT_RIGHT))
     {
@@ -85,26 +135,29 @@ static void Page_Home_OnEvent(const UI_Event *event)
     }
     else if (event->type == UI_EVENT_LEFT)
     {
+        old_selected = g_home_selected;
         g_home_selected = 0U;
-        UI_PageRequestRedraw();
+        Page_Home_InvalidateRow(old_selected);
+        Page_Home_InvalidateRow(g_home_selected);
     }
 }
 
 /*
- * Draw the home page.
+ * Draw the home page within the requested clip.
  *
  * Parameters:
- * None.
+ * clip: Dirty rectangle currently being repainted.
  *
  * Return value:
  * None.
  *
  * Side effects:
- * Replaces the visible ST7789 image.
+ * Repaints the ST7789 area intersecting clip.
  */
-static void Page_Home_Draw(void)
+static void Page_Home_Draw(const UI_Rect *clip)
 {
-    UI_DrawClear(UI_COLOR_BG);
+    (void)clip;
+
     UI_DrawStatusBar("UI HOME", UI_COLOR_ACCENT);
     UI_DrawMenuRow(12, 44, 216, "PLAYER", "OFF", (g_home_selected == 0U) ? 1U : 0U);
     UI_DrawMenuRow(12, 88, 216, "SETTINGS", 0, (g_home_selected == 1U) ? 1U : 0U);

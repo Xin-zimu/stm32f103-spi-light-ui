@@ -24,6 +24,7 @@ typedef struct
 {
     UI_EventType type;                     // Logical UI event.
     KeyId source_key;                      // Physical key that generated it.
+    KeyEventType source_type;              // Physical key event kind.
     uint32_t timestamp;                    // Timing_GetTick timestamp.
 } UI_Event;
 

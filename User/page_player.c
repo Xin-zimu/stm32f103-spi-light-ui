@@ -12,6 +12,23 @@ static PlayerState g_player_state = PLAYER_STATE_STOPPED;
 static uint8_t g_player_progress = 0U;
 
 /*
+ * Mark the dynamic player state area dirty.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Queues a local repaint covering state text and the progress bar.
+ */
+static void Page_Player_InvalidateState(void)
+{
+    UI_PageInvalidateXYWH(30, 160, 180, 40);
+}
+
+/*
  * Enter the player placeholder page.
  *
  * Parameters:
@@ -39,7 +56,7 @@ static void Page_Player_OnEnter(void)
  * None.
  *
  * Side effects:
- * Updates simulated playback state and requests redraw.
+ * Updates simulated playback state and requests local repaint.
  */
 static void Page_Player_OnEvent(const UI_Event *event)
 {
@@ -57,31 +74,33 @@ static void Page_Player_OnEvent(const UI_Event *event)
         {
             g_player_state = PLAYER_STATE_PLAYING;
         }
-        UI_PageRequestRedraw();
+        Page_Player_InvalidateState();
     }
     else if (event->type == UI_EVENT_RIGHT)
     {
         g_player_state = PLAYER_STATE_PLAYING;
         g_player_progress = 0U;
-        UI_PageRequestRedraw();
+        Page_Player_InvalidateState();
     }
 }
 
 /*
- * Draw the player placeholder page.
+ * Draw the player placeholder page within the requested clip.
  *
  * Parameters:
- * None.
+ * clip: Dirty rectangle currently being repainted.
  *
  * Return value:
  * None.
  *
  * Side effects:
- * Replaces the visible ST7789 image.
+ * Repaints the ST7789 area intersecting clip.
  */
-static void Page_Player_Draw(void)
+static void Page_Player_Draw(const UI_Rect *clip)
 {
     const char *state_text;
+
+    (void)clip;
 
     state_text = "STOPPED";
     if (g_player_state == PLAYER_STATE_PLAYING)
@@ -94,7 +113,6 @@ static void Page_Player_Draw(void)
         state_text = "PAUSED";
     }
 
-    UI_DrawClear(UI_COLOR_BG);
     UI_DrawStatusBar("PLAYER", UI_COLOR_ACCENT);
     UI_DrawRect(18, 42, 204, 112, UI_COLOR_SURFACE);
     UI_DrawFrame(34, 58, 172, 64, UI_COLOR_MUTED);

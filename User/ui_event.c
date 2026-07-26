@@ -12,6 +12,110 @@ static UI_EventQueue g_ui_event_queue;
 volatile uint32_t ui_event_drop_count = 0U;
 
 /*
+ * Classify whether an event must be preserved when the queue is full.
+ *
+ * Page escape and reset events are more important than repeated direction
+ * movement. When bursts occur, these events are allowed to replace lower
+ * priority queued input so the UI remains recoverable.
+ *
+ * Parameters:
+ * type: Logical UI event type.
+ *
+ * Return value:
+ * 1: Event is high priority.
+ * 0: Event may be dropped under pressure.
+ *
+ * Side effects:
+ * None.
+ */
+static uint8_t UI_EventIsHighPriority(UI_EventType type)
+{
+    return ((type == UI_EVENT_BACK) ||
+            (type == UI_EVENT_HOME) ||
+            (type == UI_EVENT_SETTINGS) ||
+            (type == UI_EVENT_SYSTEM_RESET)) ? 1U : 0U;
+}
+
+/*
+ * Classify whether a queued event is replaceable under pressure.
+ *
+ * Key repeat events are the first replacement target because losing one repeat
+ * step is less harmful than dropping a navigation escape. Direction press
+ * events are the fallback replacement target for high-priority commands.
+ *
+ * Parameters:
+ * event: Queued event to inspect.
+ * allow_direction_press: Nonzero to allow replacing normal direction events.
+ *
+ * Return value:
+ * 1: Event can be overwritten.
+ * 0: Event should be retained.
+ *
+ * Side effects:
+ * None.
+ */
+static uint8_t UI_EventCanReplace(const UI_Event *event, uint8_t allow_direction_press)
+{
+    if (event->source_type == KEY_EVENT_REPEAT)
+    {
+        return 1U;
+    }
+
+    if (allow_direction_press == 0U)
+    {
+        return 0U;
+    }
+
+    return ((event->type == UI_EVENT_UP) ||
+            (event->type == UI_EVENT_DOWN) ||
+            (event->type == UI_EVENT_LEFT) ||
+            (event->type == UI_EVENT_RIGHT) ||
+            (event->type == UI_EVENT_OK)) ? 1U : 0U;
+}
+
+/*
+ * Try to replace a lower-priority queued event.
+ *
+ * The ring queue keeps chronological order for normal operation. This helper
+ * only overwrites an existing slot when the queue is already full, avoiding a
+ * larger shifting implementation and keeping RAM usage fixed.
+ *
+ * Parameters:
+ * event: New event to preserve.
+ *
+ * Return value:
+ * 1: A queued event was replaced.
+ * 0: No suitable replacement was found.
+ *
+ * Side effects:
+ * May overwrite one queued event.
+ */
+static uint8_t UI_EventReplaceLowerPriority(const UI_Event *event)
+{
+    uint8_t index;
+    uint8_t slot;
+    uint8_t allow_direction_press;
+
+    allow_direction_press = UI_EventIsHighPriority(event->type);
+    for (index = 0U; index < g_ui_event_queue.count; index++)
+    {
+        slot = (uint8_t)(g_ui_event_queue.head + index);
+        if (slot >= UI_EVENT_QUEUE_SIZE)
+        {
+            slot = (uint8_t)(slot - UI_EVENT_QUEUE_SIZE);
+        }
+
+        if (UI_EventCanReplace(&g_ui_event_queue.items[slot], allow_direction_press) != 0U)
+        {
+            g_ui_event_queue.items[slot] = *event;
+            return 1U;
+        }
+    }
+
+    return 0U;
+}
+
+/*
  * Reset the fixed UI event queue.
  *
  * The queue is used by the cooperative key and UI tasks, so it has no dynamic
@@ -38,9 +142,9 @@ void UI_EventQueueInit(void)
 /*
  * Push one logical UI event into the ring queue.
  *
- * When the queue is full the new event is dropped and a counter is advanced.
- * The queue is intentionally small and the UI task drains it every loop, which
- * keeps this first-stage implementation compact enough for the 64 KB target.
+ * When the queue is full, a repeat event or lower-priority direction event can
+ * be replaced so BACK, HOME, SETTINGS, and reset are not lost during bursts.
+ * If no replacement target exists the new event is dropped and counted.
  *
  * Parameters:
  * event: Logical event to enqueue.
@@ -61,6 +165,10 @@ uint8_t UI_EventPush(const UI_Event *event)
 
     if (g_ui_event_queue.count >= UI_EVENT_QUEUE_SIZE)
     {
+        if (UI_EventReplaceLowerPriority(event) != 0U)
+        {
+            return 1U;
+        }
         ui_event_drop_count++;
         return 0U;
     }
@@ -138,6 +246,7 @@ void UI_EventPushFromKey(const KeyEvent *event)
 
     ui_event.type = UI_EVENT_NONE;
     ui_event.source_key = event->key;
+    ui_event.source_type = event->type;
     ui_event.timestamp = event->timestamp;
 
     if (event->type == KEY_EVENT_SYSTEM_RESET)

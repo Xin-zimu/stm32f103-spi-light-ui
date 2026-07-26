@@ -8,7 +8,7 @@ typedef struct
 {
     void (*on_enter)(void);                // Called when the page becomes active.
     void (*on_event)(const UI_Event *event); // Called for non-global events.
-    void (*draw)(void);                    // Draws the full page.
+    void (*draw)(const UI_Rect *clip);     // Draws content intersecting clip.
 } UI_PageOps;
 
 void UI_PageInit(void);
@@ -19,5 +19,7 @@ void UI_PageBack(void);
 void UI_PageHome(void);
 UI_PageId UI_PageGetCurrent(void);
 void UI_PageRequestRedraw(void);
+void UI_PageInvalidate(const UI_Rect *rect);
+void UI_PageInvalidateXYWH(int16_t x, int16_t y, int16_t w, int16_t h);
 
 #endif

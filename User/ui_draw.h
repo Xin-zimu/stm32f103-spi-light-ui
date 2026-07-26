@@ -4,6 +4,8 @@
 #include "ui_types.h"
 
 void UI_DrawClear(uint16_t color);
+void UI_DrawSetClip(const UI_Rect *clip);
+void UI_DrawClearClip(uint16_t color);
 void UI_DrawRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color);
 void UI_DrawFrame(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color);
 void UI_DrawText(int16_t x, int16_t y, const char *text, uint16_t color);

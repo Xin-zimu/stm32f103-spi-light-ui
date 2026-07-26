@@ -59,20 +59,21 @@ static void Page_Info_DrawRow(int16_t y, const char *label, const char *value)
 }
 
 /*
- * Draw the system information page.
+ * Draw the system information page within the requested clip.
  *
  * Parameters:
- * None.
+ * clip: Dirty rectangle currently being repainted.
  *
  * Return value:
  * None.
  *
  * Side effects:
- * Replaces the visible ST7789 image.
+ * Repaints the ST7789 area intersecting clip.
  */
-static void Page_Info_Draw(void)
+static void Page_Info_Draw(const UI_Rect *clip)
 {
-    UI_DrawClear(UI_COLOR_BG);
+    (void)clip;
+
     UI_DrawStatusBar("INFO", UI_COLOR_OK);
     Page_Info_DrawRow(42, "MCU", "STM32F103C8");
     Page_Info_DrawRow(72, "LCD", "ST7789 240");

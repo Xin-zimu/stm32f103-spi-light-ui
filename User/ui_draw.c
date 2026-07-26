@@ -2,6 +2,14 @@
 #include "bsp_st7789.h"
 #include "ui_font.h"
 
+static UI_Rect g_ui_draw_clip =
+{
+    0,
+    0,
+    (int16_t)UI_SCREEN_W,
+    (int16_t)UI_SCREEN_H
+};
+
 /*
  * Clear the full visible display.
  *
@@ -17,6 +25,53 @@
 void UI_DrawClear(uint16_t color)
 {
     ST7789_Clear(color);
+}
+
+/*
+ * Set the current drawing clip rectangle.
+ *
+ * All later UI drawing primitives intersect their target area with this clip.
+ * Passing NULL restores a full-screen clip. The clip is intended for dirty
+ * rectangle redraw, not for arbitrary nested clipping.
+ *
+ * Parameters:
+ * clip: Rectangle to constrain drawing, or NULL for full screen.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Updates module-local drawing state.
+ */
+void UI_DrawSetClip(const UI_Rect *clip)
+{
+    if (clip == 0)
+    {
+        g_ui_draw_clip.x = 0;
+        g_ui_draw_clip.y = 0;
+        g_ui_draw_clip.w = (int16_t)UI_SCREEN_W;
+        g_ui_draw_clip.h = (int16_t)UI_SCREEN_H;
+        return;
+    }
+
+    g_ui_draw_clip = *clip;
+}
+
+/*
+ * Clear only the current clip rectangle.
+ *
+ * Parameters:
+ * color: RGB565 fill color.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Repaints the active clipped area.
+ */
+void UI_DrawClearClip(uint16_t color)
+{
+    UI_DrawRect(g_ui_draw_clip.x, g_ui_draw_clip.y, g_ui_draw_clip.w, g_ui_draw_clip.h, color);
 }
 
 /*
@@ -37,6 +92,11 @@ void UI_DrawClear(uint16_t color)
  */
 void UI_DrawRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)
 {
+    int16_t right;
+    int16_t bottom;
+    int16_t clip_right;
+    int16_t clip_bottom;
+
     if ((w <= 0) || (h <= 0) || (x >= (int16_t)UI_SCREEN_W) || (y >= (int16_t)UI_SCREEN_H))
     {
         return;
@@ -59,6 +119,36 @@ void UI_DrawRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)
     {
         h = (int16_t)((int16_t)UI_SCREEN_H - y);
     }
+
+    right = (int16_t)(x + w);
+    bottom = (int16_t)(y + h);
+    clip_right = (int16_t)(g_ui_draw_clip.x + g_ui_draw_clip.w);
+    clip_bottom = (int16_t)(g_ui_draw_clip.y + g_ui_draw_clip.h);
+    if ((right <= g_ui_draw_clip.x) || (bottom <= g_ui_draw_clip.y) ||
+        (x >= clip_right) || (y >= clip_bottom))
+    {
+        return;
+    }
+
+    if (x < g_ui_draw_clip.x)
+    {
+        x = g_ui_draw_clip.x;
+    }
+    if (y < g_ui_draw_clip.y)
+    {
+        y = g_ui_draw_clip.y;
+    }
+    if (right > clip_right)
+    {
+        right = clip_right;
+    }
+    if (bottom > clip_bottom)
+    {
+        bottom = clip_bottom;
+    }
+    w = (int16_t)(right - x);
+    h = (int16_t)(bottom - y);
+
     if ((w > 0) && (h > 0))
     {
         ST7789_FillRect((uint16_t)x, (uint16_t)y, (uint16_t)w, (uint16_t)h, color);
@@ -148,7 +238,13 @@ void UI_DrawText(int16_t x, int16_t y, const char *text, uint16_t color)
 {
     while ((text != 0) && (*text != '\0') && (x < (int16_t)UI_SCREEN_W))
     {
-        UI_DrawChar(x, y, *text, color);
+        if (((x + (int16_t)UI_FONT_WIDTH) > g_ui_draw_clip.x) &&
+            (x < (g_ui_draw_clip.x + g_ui_draw_clip.w)) &&
+            ((y + (int16_t)UI_FONT_HEIGHT) > g_ui_draw_clip.y) &&
+            (y < (g_ui_draw_clip.y + g_ui_draw_clip.h)))
+        {
+            UI_DrawChar(x, y, *text, color);
+        }
         x = (int16_t)(x + (int16_t)UI_FONT_WIDTH);
         text++;
     }

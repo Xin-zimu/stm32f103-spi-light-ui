@@ -3,6 +3,8 @@
 #include "page_info.h"
 #include "page_player.h"
 #include "page_settings.h"
+#include "ui_dirty.h"
+#include "ui_draw.h"
 
 static const UI_PageOps * const UI_PAGES[UI_PAGE_COUNT] =
 {
@@ -13,7 +15,6 @@ static const UI_PageOps * const UI_PAGES[UI_PAGE_COUNT] =
 };
 
 static UI_PageId g_ui_current_page = UI_PAGE_HOME;
-static uint8_t g_ui_page_redraw_pending = 0U;
 
 /*
  * Initialize page routing and enter the home page.
@@ -29,6 +30,7 @@ static uint8_t g_ui_page_redraw_pending = 0U;
  */
 void UI_PageInit(void)
 {
+    UI_DirtyInit();
     g_ui_current_page = UI_PAGE_HOME;
     if (UI_PAGES[g_ui_current_page]->on_enter != 0)
     {
@@ -51,7 +53,44 @@ void UI_PageInit(void)
  */
 void UI_PageRequestRedraw(void)
 {
-    g_ui_page_redraw_pending = 1U;
+    UI_DirtyFullScreen();
+}
+
+/*
+ * Request a local redraw of the active page.
+ *
+ * Parameters:
+ * rect: Page-space rectangle that needs repainting.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Adds one clipped rectangle to the dirty list.
+ */
+void UI_PageInvalidate(const UI_Rect *rect)
+{
+    UI_DirtyAdd(rect);
+}
+
+/*
+ * Request a local redraw from raw coordinates.
+ *
+ * Parameters:
+ * x: Left coordinate.
+ * y: Top coordinate.
+ * w: Width in pixels.
+ * h: Height in pixels.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Adds one clipped rectangle to the dirty list.
+ */
+void UI_PageInvalidateXYWH(int16_t x, int16_t y, int16_t w, int16_t h)
+{
+    UI_DirtyAddXYWH(x, y, w, h);
 }
 
 /*
@@ -205,16 +244,20 @@ void UI_PageDispatchEvent(const UI_Event *event)
  */
 void UI_PageTask(uint32_t now)
 {
+    UI_Rect dirty;
+
     (void)now;
 
-    if (g_ui_page_redraw_pending == 0U)
+    if (UI_DirtyPop(&dirty) == 0U)
     {
         return;
     }
 
-    g_ui_page_redraw_pending = 0U;
     if (UI_PAGES[g_ui_current_page]->draw != 0)
     {
-        UI_PAGES[g_ui_current_page]->draw();
+        UI_DrawSetClip(&dirty);
+        UI_DrawClearClip(UI_COLOR_BG);
+        UI_PAGES[g_ui_current_page]->draw(&dirty);
+        UI_DrawSetClip(0);
     }
 }

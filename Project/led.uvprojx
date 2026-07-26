@@ -500,6 +500,16 @@
               <FilePath>..\User\ui_types.h</FilePath>
             </File>
             <File>
+              <FileName>ui_dirty.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\ui_dirty.c</FilePath>
+            </File>
+            <File>
+              <FileName>ui_dirty.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\ui_dirty.h</FilePath>
+            </File>
+            <File>
               <FileName>ui_font.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\ui_font.c</FilePath>
