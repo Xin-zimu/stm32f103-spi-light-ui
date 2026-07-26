@@ -137,6 +137,8 @@ void UI_EventPushFromKey(const KeyEvent *event)
     }
 
     ui_event.type = UI_EVENT_NONE;
+    ui_event.source_key = event->key;
+    ui_event.timestamp = event->timestamp;
 
     if (event->type == KEY_EVENT_SYSTEM_RESET)
     {

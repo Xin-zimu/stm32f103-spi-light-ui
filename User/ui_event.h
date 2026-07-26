@@ -23,6 +23,8 @@ typedef enum
 typedef struct
 {
     UI_EventType type;                     // Logical UI event.
+    KeyId source_key;                      // Physical key that generated it.
+    uint32_t timestamp;                    // Timing_GetTick timestamp.
 } UI_Event;
 
 extern volatile uint32_t ui_event_drop_count;
