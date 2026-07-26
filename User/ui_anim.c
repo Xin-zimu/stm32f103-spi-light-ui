@@ -33,7 +33,13 @@ static uint16_t UI_AnimEaseOutCubic(uint32_t elapsed_ms, uint16_t duration_ms)
 }
 
 /*
- * Build a dirty rectangle covering the old and new focus marker positions.
+ * Build a dirty rectangle covering only old and new focus marker positions.
+ *
+ * The focus marker is a five-pixel strip. Repainting the full menu row while
+ * the strip animates forces Chinese text and row backgrounds through the LCD
+ * on every frame, which is visible as jitter on STM32F103. This rectangle is
+ * intentionally narrow so animation frames only erase and redraw the marker
+ * strip.
  *
  * Parameters:
  * old_y: Previous marker Y coordinate.
@@ -55,9 +61,9 @@ static void UI_FocusAnimBuildDirty(int16_t old_y, int16_t new_y, UI_Rect *dirty)
     bottom = (old_y > new_y) ? old_y : new_y;
 
     dirty->x = 12;
-    dirty->y = (int16_t)(top - 2);
-    dirty->w = 216;
-    dirty->h = (int16_t)((bottom - top) + (int16_t)UI_ROW_H + 4);
+    dirty->y = (int16_t)(top + 4);
+    dirty->w = 5;
+    dirty->h = (int16_t)((bottom - top) + (int16_t)UI_ROW_H - 8);
 }
 
 /*
@@ -106,16 +112,19 @@ void UI_FocusAnimInit(UI_FocusAnim *anim, int16_t y)
  */
 void UI_FocusAnimStart(UI_FocusAnim *anim, int16_t from_y, int16_t to_y, uint32_t now)
 {
+    int16_t start_y;
+
     if (anim == 0)
     {
         return;
     }
 
-    anim->active = (from_y != to_y) ? 1U : 0U;
-    anim->from_y = from_y;
+    start_y = (anim->active != 0U) ? anim->current_y : from_y;
+    anim->active = (start_y != to_y) ? 1U : 0U;
+    anim->from_y = start_y;
     anim->to_y = to_y;
-    anim->current_y = from_y;
-    anim->last_y = from_y;
+    anim->current_y = start_y;
+    anim->last_y = start_y;
     anim->start_ms = now;
     anim->last_step_ms = now;
 }

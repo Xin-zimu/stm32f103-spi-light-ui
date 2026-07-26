@@ -229,6 +229,52 @@ void UI_DirtyAdd(const UI_Rect *rect)
 }
 
 /*
+ * Add a dirty rectangle without merging it with existing areas.
+ *
+ * Focus-marker animation must stay as a narrow repaint. If the marker area is
+ * merged into a pending row repaint, one animation frame can become a wide
+ * text redraw and appear to stutter. This entry point still clips and promotes
+ * overflow to full-screen, but deliberately skips the merge scan.
+ *
+ * Parameters:
+ * rect: Rectangle that must be redrawn independently.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Updates the pending dirty list.
+ */
+void UI_DirtyAddIsolated(const UI_Rect *rect)
+{
+    UI_Rect clipped;
+
+    if (g_ui_dirty.full_screen != 0U)
+    {
+        return;
+    }
+    if (rect == 0)
+    {
+        return;
+    }
+
+    clipped = *rect;
+    if (UI_DirtyClipRect(&clipped) == 0U)
+    {
+        return;
+    }
+
+    if (g_ui_dirty.count >= UI_DIRTY_MAX_RECTS)
+    {
+        UI_DirtyFullScreen();
+        return;
+    }
+
+    g_ui_dirty.rects[g_ui_dirty.count] = clipped;
+    g_ui_dirty.count++;
+}
+
+/*
  * Add a dirty rectangle from raw coordinates.
  *
  * Parameters:

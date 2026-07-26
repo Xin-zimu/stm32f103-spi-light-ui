@@ -1,5 +1,6 @@
 #include "page_home.h"
 #include "ui_anim.h"
+#include "ui_dirty.h"
 #include "ui_draw.h"
 #include "ui_feedback.h"
 
@@ -75,7 +76,7 @@ static void Page_Home_InvalidateRow(uint8_t index)
  */
 static void Page_Home_InvalidateAnim(const UI_Rect *dirty)
 {
-    UI_PageInvalidate(dirty);
+    UI_DirtyAddIsolated(dirty);
 }
 
 /*

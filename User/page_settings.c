@@ -1,5 +1,6 @@
 #include "page_settings.h"
 #include "ui_anim.h"
+#include "ui_dirty.h"
 #include "ui_draw.h"
 #include "ui_feedback.h"
 
@@ -79,14 +80,14 @@ static void Page_Settings_InvalidateRow(uint8_t index)
  */
 static void Page_Settings_InvalidateAnim(const UI_Rect *dirty)
 {
-    UI_PageInvalidate(dirty);
+    UI_DirtyAddIsolated(dirty);
 }
 
 /*
  * Enter the settings page.
  *
  * Parameters:
- * now: Timestamp of the key event that requested the change.
+ * None.
  *
  * Return value:
  * None.
@@ -106,7 +107,7 @@ static void Page_Settings_OnEnter(void)
  * Change the currently focused setting.
  *
  * Parameters:
- * None.
+ * now: Timestamp of the key event that requested the change.
  *
  * Return value:
  * None.
