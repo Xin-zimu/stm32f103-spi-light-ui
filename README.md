@@ -1,182 +1,275 @@
-# STM32F103 ST7789 GIF 动画工程
+# STM32F103 ST7789 轻量 UI 工程
 
-当前工程用于验证一个无 CS 引脚的 7 针 ST7789 240x240 彩屏。
+这是一个基于 STM32F103C8T6、ST7789 240x240 SPI 彩屏和 5D 摇杆的裸机轻量 UI 项目。
 
-上电初始化成功后，屏幕循环播放 `小猫图.gif` 转换得到的动画。原 GIF 为
-120x120、28 帧、40 ms/帧；工程使用已授权的 Arm Compiler 6.24，
-保留全部28帧并按原始40 ms间隔播放，将源像素放大2倍覆盖屏幕。
+当前仓库的主线目标是：在不使用 LVGL、不使用动态内存、不使用全帧缓冲的前提下，实现可读、可操作、可继续扩展的嵌入式 UI。
 
-## 硬件接线
+## 当前状态
 
-| ST7789 | STM32F103C8T6 | 作用 |
+当前构建是 **UI-first 版本**：
+
+- 已接入 5D 摇杆按键输入。
+- 已完成 HOME / PLAYER / SETTINGS / INFO 页面框架。
+- 已实现脏矩形局部刷新。
+- 已实现 16x16 中文子集字库和放大 ASCII 字体。
+- 已实现 HOME / SETTINGS 焦点条动画。
+- 已修复焦点条抽动问题。
+- GIF 播放源码和历史文档保留，但 GIF 数据和播放模块当前不参与 Keil 构建。
+
+当前最新验证构建结果：
+
+```text
+0 Error(s), 0 Warning(s)
+Code=12152
+RO-data=1984
+RW-data=16
+ZI-data=2424
+```
+
+## 硬件
+
+### ST7789
+
+| 功能 | STM32F103C8T6 | 说明 |
 | --- | --- | --- |
-| GND | GND | 电源地，必须共地 |
-| VCC | 3.3V | 模块电源 |
-| SCL | PB13 | SPI2 SCK 时钟 |
-| SDA | PB15 | SPI2 MOSI 数据 |
-| RES | PB10 | 硬件复位 |
+| SCK | PB13 | SPI2 SCK |
+| MOSI | PB15 | SPI2 MOSI |
+| RES | PB10 | LCD 复位 |
 | DC | PB14 | 命令/数据选择 |
-| BLK | PB12 | 背光控制，高电平点亮 |
+| BLK | PB12 | 背光控制 |
+| CS | 无 | 当前屏幕模块无外部 CS |
 
 注意：
 
-- `SCL` 和 `SDA` 在该屏幕上是 SPI 信号，不是 I2C。
-- 模块没有 MISO，STM32 只向屏幕发送数据。
-- 模块没有外部 CS 引脚，代码使用 `ST7789_USE_CS=0`，不依赖片选操作。
-- `DC=0` 发送命令，`DC=1` 发送数据。
-- 所有信号和电源均按 3.3V 使用。
+- SCL/SDA 在该屏幕上是 SPI 信号，不是 I2C。
+- 屏幕无 MISO，STM32 只向屏幕发送数据。
+- 当前驱动配置为 240x240、SPI Mode 3、无 CS。
 
-## 当前驱动配置
+### 5D 摇杆
 
-驱动配置位于 [User/bsp_st7789.h](User/bsp_st7789.h)：
+5D 摇杆按 **7 个共地数字按键** 使用，不需要 SPI、ADC 或屏幕接口。
 
-```c
-#define ST7789_WIDTH               240U
-#define ST7789_HEIGHT              240U
-#define ST7789_X_OFFSET            0U
-#define ST7789_Y_OFFSET            0U
-#define ST7789_USE_CS              0U
-#define ST7789_SPI_MODE            3U
-#define ST7789_SPI_PRESCALER       SPI_BaudRatePrescaler_2
-```
+| 摇杆功能 | STM32F103C8T6 | 配置 |
+| --- | --- | --- |
+| COM | GND | 公共地 |
+| UP | PA0 | 输入上拉 |
+| DOWN | PA1 | 输入上拉 |
+| LEFT | PA2 | 输入上拉 |
+| RIGHT | PA3 | 输入上拉 |
+| MID | PA4 | 输入上拉 |
+| SET | PA5 | 输入上拉 |
+| RST | PA6 | 输入上拉 |
 
-当前使用：
-
-- STM32F10x 标准外设库。
-- SPI2 主机模式、单线发送、8 位数据、MSB first。
-- SPI2 约 18 MHz。
-- ST7789 命令、控制参数和地址窗口仍使用同步 SPI 字节发送。
-- 清屏、矩形填充、完整帧和 GIF 差分像素流使用 SPI2 TX DMA。
-- SPI2 TX 映射到 DMA1 Channel5，DMA 完成中断负责释放发送状态。
-- 当前屏幕实测使用 SPI Mode 3。
-- RGB565 颜色格式。
-- 240x240 地址窗口，Y 偏移为 0。
-- 初始化期间先关闭背光，复位并清黑屏后再打开背光。
-- 不创建全屏帧缓冲，不使用动态内存；驱动只使用两个 240 像素行缓冲。
-- TIM3 提供 1 ms 动画时基，等待下一帧期间主循环不阻塞。
-- 首帧完整写入，后续帧只更新变化像素。
-- GIF 差分刷新由异步状态机推进，主循环在 DMA 传输期间可以继续返回。
-
-## SPI Mode 切换
-
-当前实测配置为 Mode 3：
-
-```c
-#define ST7789_SPI_MODE            3U
-```
-
-如果更换屏幕后只有背光、完全没有纯色，可尝试 Mode 0：
-
-```c
-#define ST7789_SPI_MODE            0U
-```
-
-修改后必须重新执行 `Rebuild` 和 `Download`。驱动只接受 Mode 0 或 Mode 3，
-其他数值会在编译时报告错误。
-
-## 工程文件
-
-当前 Keil 工程主要编译：
+按键电平：
 
 ```text
-User/main.c
-User/bsp_st7789.c
-User/anim_frames.c
-User/app_st7789_anim.c
-User/fault_handlers.c
-SYSTEM/delay/delay.c
-SYSTEM/timing/timing.c
-SYSTEM/usart/usart.c
-Libraries/src/stm32f10x_gpio.c
-Libraries/src/stm32f10x_rcc.c
-Libraries/src/stm32f10x_spi.c
-Libraries/src/stm32f10x_tim.c
-Libraries/src/stm32f10x_usart.c
-Libraries/src/stm32f10x_dma.c
+未按下：高电平
+按下：低电平
 ```
 
-程序入口是 [User/main.c](User/main.c)，屏幕驱动是
-[User/bsp_st7789.c](User/bsp_st7789.c)。
+保留接口：
 
-目录中旧 OLED 和实验代码仍然保留，但不参与当前 GIF 播放流程。
+| 功能 | 引脚 |
+| --- | --- |
+| USART1 TX | PA9 |
+| USART1 RX | PA10 |
+| SWDIO | PA13 |
+| SWCLK | PA14 |
 
-## GIF 转换与存储
+不要占用 PA13/PA14，否则会影响 ST-Link 下载和调试。
 
-[Tools/generate_st7789_gif.py](Tools/generate_st7789_gif.py) 使用 Pillow 完成：
+## 软件架构
 
-1. 合成 GIF 的透明和局部更新帧。
-2. 保留全部28帧动画。
-3. 为全部帧建立一套 16 色 RGB565 调色板。
-4. 首帧保存为 4 位索引整帧，共 7200 字节。
-5. 后续帧按行保存“跳过未变化像素”和“绘制变化像素”指令。
-6. 反向解码每个帧差，确认生成数据能精确恢复量化后的图像。
+```text
+key_driver
+    10 ms 扫描、20 ms 消抖、长按、连发、RST 复位
+        ↓
+ui_event
+    固定环形事件队列，物理按键转 UI 事件
+        ↓
+app_ui
+    每轮处理有限数量事件，避免连发阻塞绘制
+        ↓
+ui_page
+    页面路由、全局事件、页面 task、脏区绘制
+        ↓
+page_home / page_player / page_settings / page_info
+        ↓
+ui_draw / ui_font
+    中文子集、大号 ASCII、菜单行、状态栏、页脚、控件绘制
+        ↓
+ui_dirty
+    脏矩形队列、裁剪、合并、动画窄脏区
+        ↓
+bsp_st7789
+    ST7789 SPI/DMA 底层驱动
+```
 
-当前帧差数据为49109字节，动画数据合计56309字节。STM32 不在 RAM
-中保存上一帧，而是利用 ST7789 显存保留未变化区域。
-固件运行时会继续校验差分流边界：差分数据必须覆盖完整源图，提前结束或
-多余尾部字节都会触发错误恢复，重新绘制完整首帧后再继续播放。
+## 当前页面
 
-原始 `小猫图.gif` 是本地输入素材，不纳入 Git；仓库中已包含转换后的
-`anim_frames.c/.h`，正常编译和烧录不依赖原始 GIF。
+### HOME
 
-## 编译和烧录
+中文大字号菜单：
 
-使用 [Project/led.uvprojx](Project/led.uvprojx)：
+- 动画播放器
+- 设置
+- 系统信息
+
+UP/DOWN 移动焦点，MID/RIGHT 进入。
+
+### PLAYER
+
+当前是播放器占位页：
+
+- 显示 GIF 禁用中。
+- 保留播放/暂停/停止状态机。
+- 后续恢复 GIF 时应只作为 PLAYER 页内部组件接入。
+
+### SETTINGS
+
+当前设置项：
+
+- 动画：开/关
+- 亮度：1..5
+- 主题：CYAN / GOLD / GREEN
+
+LEFT 返回，RIGHT/MID 修改当前项。
+
+### INFO
+
+显示 MCU、LCD、按键、GIF 状态和当前构建状态。
+
+## 关键实现
+
+### 不使用动态内存
+
+项目不使用 `malloc()` / `free()`。事件队列、脏矩形队列、动画状态均为固定静态存储。
+
+示例：
+
+```c
+static UI_Event items[16];
+static UI_Rect rects[8];
+static UI_FocusAnim g_home_focus_anim;
+```
+
+### 不使用全帧缓冲
+
+240x240 RGB565 全屏 framebuffer 需要：
+
+```text
+240 x 240 x 2 = 115200 字节
+```
+
+STM32F103C8T6 RAM 只有约 20 KB，因此不能保存整屏图像。当前策略是：
+
+```text
+哪里变化，就刷新哪里
+```
+
+### 脏矩形刷新
+
+普通 UI 变化使用 `UI_DirtyAdd()`，会裁剪并合并相近区域。动画焦点条使用 `UI_DirtyAddIsolated()`，避免窄条脏区被合并成整行刷新。
+
+焦点条抽动修复后的核心原则：
+
+```text
+视觉上只有 5px 焦点条在动
+实际刷新也必须只有 5px 焦点条区域
+```
+
+## 目录说明
+
+```text
+Project/
+    Keil MDK 工程文件
+
+User/
+    应用层、UI、按键、ST7789 驱动
+
+SYSTEM/
+    delay、timing 等系统辅助模块
+
+Libraries/
+    STM32F10x 标准外设库
+
+Tools/
+    GIF 转换等辅助脚本
+
+docs/
+    学习文档、历史排障文档、变更日志
+```
+
+重点文档：
+
+- [UI 开发学习文档](docs/ui-development-learning-guide.md)
+- [ST7789 逻辑分析仪排障指南](docs/st7789-logic-analyzer-troubleshooting-guide.md)
+- [ST7789 差分刷新优化学习笔记](docs/st7789-delta-optimization-learning.md)
+- [历史 GIF 动画实现说明](docs/spi_oled_gif_animation.md)
+
+## 编译
+
+使用 Keil MDK 打开：
+
+```text
+Project/led.uvprojx
+```
+
+步骤：
 
 1. 打开 Keil 工程。
 2. 执行 `Rebuild`。
-3. 确认结果为 `0 Error(s), 0 Warning(s)`。
-4. 执行 `Download`。
+3. 确认 `0 Error(s), 0 Warning(s)`。
+4. 使用 ST-Link 下载。
 5. 复位开发板。
-6. 确认小猫动画连续循环，没有错位、闪烁或上一轮残留。
 
-标准输出文件为：
-
-```text
-Output/led.hex
-```
-
-## 背光亮但没有图像
-
-按以下顺序排查：
-
-1. 确认下载的是当前 `Project/led.uvprojx` 生成的固件。
-2. 确认 SCL 接 PB13、SDA 接 PB15，没有按 I2C 方式接线。
-3. 确认 RES 接 PB10、DC 接 PB14，二者没有接反。
-4. 确认 BLK 接 PB12，且初始化完成后 PB12 为高电平。
-5. 测量 PB10，启动时应出现低电平复位脉冲。
-6. 测量 PB13，刷屏时应出现 SPI 时钟。
-7. 测量 PB15，刷屏时应出现数据变化。
-8. 确认 PB14 在命令和数据发送期间会切换电平。
-9. 在 Mode 3 和 Mode 0 之间切换后重新编译烧录。
-10. 如果信号均正常，确认模块控制器确实是 ST7789，且内部 CS 已固定为有效状态。
-
-背光亮只说明 VCC、GND 和 BLK 基本正常，不代表 ST7789 已经初始化成功。
-
-## 图像偏移或颜色异常
-
-纯色出现但位置不正确时，调整：
+当前主循环入口：
 
 ```c
-#define ST7789_X_OFFSET            0U
-#define ST7789_Y_OFFSET            0U
+int main(void)
+{
+    ...
+    Key_Init();
+    App_UI_Init();
+
+    while (1)
+    {
+        now = Timing_GetTick();
+        Key_Task(now);
+        App_UI_Task(now);
+    }
+}
 ```
 
-本次 240x240 面板实测使用 Y 偏移 0。其他 240x240 模块也可能使用 Y 偏移 80，
-必须结合不对称测试图确认，不能只依赖纯色画面。
-颜色红蓝互换时，需要继续检查
-`ST7789_MADCTL_VALUE` 的 RGB/BGR 配置，但在纯色完全不显示时不要先改颜色方向。
+## 当前按键语义
 
-完整排障方法见
-[ST7789 与逻辑分析仪排障学习指南](docs/st7789-logic-analyzer-troubleshooting-guide.md)。
+| 按键 | 功能 |
+| --- | --- |
+| UP | 上移焦点 |
+| DOWN | 下移焦点 |
+| LEFT | 返回 |
+| RIGHT | 进入 / 修改 |
+| MID | 确认 / 修改 |
+| SET | 打开设置 |
+| RST 短按 | 返回 |
+| RST 长按约 600 ms | 回主页 |
+| RST 持续约 2 秒 | 软件复位 |
 
-如果要学习 GIF 差分刷新、短空洞合并和 DMA 段统计的优化方法，见
-[ST7789 差分刷新优化学习笔记](docs/st7789-delta-optimization-learning.md)。
+## 后续计划
 
-当前阶段验收标准：
+建议下一步优先继续打磨 UI，而不是立刻恢复 GIF：
 
-1. 上电后显示真实小猫动画。
-2. 28帧按40 ms间隔连续循环。
-3. 动画覆盖完整 240x240 可见区。
-4. 帧差更新区域没有错位、花屏或残留。
-5. 复位后可重新从首帧开始播放。
+1. SETTINGS 亮度进度条只刷新进度条区域。
+2. HOME 进入页面增加短 pressed 反馈。
+3. 页脚文案进一步压缩，避免中文拥挤。
+4. PLAYER 页作为独立组件恢复 GIF 播放。
+5. 评估 GIF 数据重新加入后的 Flash 余量。
+
+恢复 GIF 时的原则：
+
+```text
+GIF 只属于 PLAYER 页面
+离开 PLAYER 停止 GIF task
+进入 PLAYER 重置 GIF 状态
+HOME / SETTINGS / INFO 不依赖 GIF
+```
