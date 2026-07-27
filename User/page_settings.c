@@ -7,6 +7,10 @@
 #define PAGE_SETTINGS_ITEM_COUNT   3U      // Animation, brightness, and theme.
 #define PAGE_SETTINGS_ROW_Y0      46       // First large setting row top.
 #define PAGE_SETTINGS_ROW_STEP    54       // Distance between large setting rows.
+#define PAGE_SETTINGS_BRIGHT_X   128       // Brightness progress bar left coordinate.
+#define PAGE_SETTINGS_BRIGHT_Y   116       // Brightness progress bar top coordinate.
+#define PAGE_SETTINGS_BRIGHT_W    78       // Brightness progress bar width.
+#define PAGE_SETTINGS_BRIGHT_H    10       // Brightness progress bar height.
 #define TEXT_SETTINGS_TITLE       "\xC9\xE8\xD6\xC3"
 #define TEXT_ANIMATION            "\xB6\xAF\xBB\xAD"
 #define TEXT_BRIGHTNESS           "\xC1\xC1\xB6\xC8"
@@ -21,6 +25,30 @@ static uint8_t g_settings_brightness = 3U;
 static uint8_t g_settings_theme = 0U;
 static UI_FocusAnim g_settings_focus_anim;
 static uint32_t g_settings_draw_now = 0U;
+
+/*
+ * Build the repaint rectangle for the brightness progress bar.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * Rectangle covering the bar and its feedback frame.
+ *
+ * Side effects:
+ * None.
+ */
+static UI_Rect Page_Settings_GetBrightnessRect(void)
+{
+    UI_Rect rect;
+
+    rect.x = PAGE_SETTINGS_BRIGHT_X;
+    rect.y = PAGE_SETTINGS_BRIGHT_Y;
+    rect.w = PAGE_SETTINGS_BRIGHT_W;
+    rect.h = PAGE_SETTINGS_BRIGHT_H;
+
+    return rect;
+}
 
 /*
  * Build the repaint rectangle for one settings row.
@@ -113,7 +141,8 @@ static void Page_Settings_OnEnter(void)
  * None.
  *
  * Side effects:
- * Updates one RAM setting and requests a local row repaint.
+ * Updates one RAM setting and requests the smallest repaint area that reflects
+ * the changed value.
  */
 static void Page_Settings_ChangeValue(uint32_t now)
 {
@@ -130,6 +159,10 @@ static void Page_Settings_ChangeValue(uint32_t now)
         {
             g_settings_brightness = 1U;
         }
+        rect = Page_Settings_GetBrightnessRect();
+        UI_FeedbackPress(&rect, now);
+        UI_PageInvalidate(&rect);
+        return;
     }
     else
     {
@@ -237,6 +270,7 @@ static void Page_Settings_Task(uint32_t now)
 static void Page_Settings_Draw(const UI_Rect *clip)
 {
     static const char * const theme_names[3] = {"CYAN", "GOLD", "GREEN"};
+    UI_Rect rect;
     UI_Rect row;
 
     (void)clip;
@@ -254,7 +288,12 @@ static void Page_Settings_Draw(const UI_Rect *clip)
     );
     row = Page_Settings_GetRowRect(1U);
     UI_DrawMenuRowCNEx(12, row.y, 216, TEXT_BRIGHTNESS, 0, (g_settings_selected == 1U) ? 1U : 0U, UI_FeedbackIsActive(&row, g_settings_draw_now));
-    UI_DrawProgressBar(128, 116, 78, g_settings_brightness, 5U);
+    rect = Page_Settings_GetBrightnessRect();
+    UI_DrawProgressBar(rect.x, rect.y, rect.w, g_settings_brightness, 5U);
+    if (UI_FeedbackIsActive(&rect, g_settings_draw_now) != 0U)
+    {
+        UI_DrawFrame(rect.x, rect.y, rect.w, rect.h, UI_COLOR_WARN);
+    }
     row = Page_Settings_GetRowRect(2U);
     UI_DrawMenuRowCNEx(
         12,

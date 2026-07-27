@@ -1,5 +1,6 @@
 #include "page_player.h"
 #include "ui_draw.h"
+#include "ui_feedback.h"
 
 #define TEXT_PLAYER_TITLE       "\xB2\xA5\xB7\xC5"
 #define TEXT_NO_GIF            "NO GIF"
@@ -18,6 +19,10 @@
 #define PLAYER_SCAN_W          30       // Moving scan band width.
 #define PLAYER_SPRITE_SIZE     12       // Moving block size.
 #define PLAYER_WAVE_COUNT      8U       // Number of generated waveform bars.
+#define PLAYER_STATE_X         24       // State panel left coordinate.
+#define PLAYER_STATE_Y        158       // State panel top coordinate.
+#define PLAYER_STATE_W        192       // State panel width.
+#define PLAYER_STATE_H         44       // State panel height.
 
 typedef enum
 {
@@ -30,6 +35,7 @@ static PlayerState g_player_state = PLAYER_STATE_STOPPED;
 static uint8_t g_player_progress = 0U;
 static uint16_t g_player_frame = 0U;
 static uint32_t g_player_last_step_ms = 0U;
+static uint32_t g_player_draw_now = 0U;
 
 /*
  * Build the fixed program-animation canvas rectangle.
@@ -81,6 +87,30 @@ static void Page_Player_InvalidateAnim(void)
 }
 
 /*
+ * Build the dynamic state panel rectangle.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * Rectangle covering state text and the progress bar.
+ *
+ * Side effects:
+ * None.
+ */
+static UI_Rect Page_Player_GetStateRect(void)
+{
+    UI_Rect rect;
+
+    rect.x = PLAYER_STATE_X;
+    rect.y = PLAYER_STATE_Y;
+    rect.w = PLAYER_STATE_W;
+    rect.h = PLAYER_STATE_H;
+
+    return rect;
+}
+
+/*
  * Mark the dynamic player state area dirty.
  *
  * Parameters:
@@ -94,7 +124,10 @@ static void Page_Player_InvalidateAnim(void)
  */
 static void Page_Player_InvalidateState(void)
 {
-    UI_PageInvalidateXYWH(24, 158, 192, 44);
+    UI_Rect rect;
+
+    rect = Page_Player_GetStateRect();
+    UI_PageInvalidate(&rect);
 }
 
 /*
@@ -137,6 +170,8 @@ static void Page_Player_OnEvent(const UI_Event *event)
     }
     else if (event->type == UI_EVENT_OK)
     {
+        UI_Rect rect;
+
         if (g_player_state == PLAYER_STATE_PLAYING)
         {
             g_player_state = PLAYER_STATE_PAUSED;
@@ -148,15 +183,21 @@ static void Page_Player_OnEvent(const UI_Event *event)
             g_player_progress = 100U;
             g_player_last_step_ms = event->timestamp;
         }
+        rect = Page_Player_GetStateRect();
+        UI_FeedbackPress(&rect, event->timestamp);
         Page_Player_InvalidateState();
         Page_Player_InvalidateAnim();
     }
     else if (event->type == UI_EVENT_RIGHT)
     {
+        UI_Rect rect;
+
         g_player_state = PLAYER_STATE_PLAYING;
         g_player_progress = 100U;
         g_player_frame = 0U;
         g_player_last_step_ms = event->timestamp;
+        rect = Page_Player_GetStateRect();
+        UI_FeedbackPress(&rect, event->timestamp);
         Page_Player_InvalidateState();
         Page_Player_InvalidateAnim();
     }
@@ -181,6 +222,7 @@ static void Page_Player_OnEvent(const UI_Event *event)
  */
 static void Page_Player_Task(uint32_t now)
 {
+    g_player_draw_now = now;
     if (g_player_state != PLAYER_STATE_PLAYING)
     {
         return;
@@ -194,6 +236,55 @@ static void Page_Player_Task(uint32_t now)
     g_player_last_step_ms = now;
     g_player_frame++;
     Page_Player_InvalidateAnim();
+}
+
+/*
+ * Convert a 16-bit value to decimal ASCII.
+ *
+ * The PLAYER page uses this for frame display without pulling in formatted
+ * stdio. The caller supplies a small buffer, and the function always writes a
+ * terminated string when the buffer has at least two bytes.
+ *
+ * Parameters:
+ * value: Value to format.
+ * buffer: Destination character buffer.
+ * buffer_size: Number of bytes in buffer.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Writes buffer.
+ */
+static void Page_Player_FormatU16(uint16_t value, char *buffer, uint8_t buffer_size)
+{
+    char digits[5];
+    uint8_t count;
+    uint8_t index;
+
+    if ((buffer == 0) || (buffer_size < 2U))
+    {
+        return;
+    }
+
+    count = 0U;
+    do
+    {
+        digits[count] = (char)('0' + (value % 10U));
+        value = (uint16_t)(value / 10U);
+        count++;
+    } while ((value != 0U) && (count < sizeof(digits)));
+
+    if (count >= buffer_size)
+    {
+        count = (uint8_t)(buffer_size - 1U);
+    }
+
+    for (index = 0U; index < count; index++)
+    {
+        buffer[index] = digits[count - 1U - index];
+    }
+    buffer[count] = '\0';
 }
 
 /*
@@ -216,6 +307,7 @@ static void Page_Player_Task(uint32_t now)
 static void Page_Player_DrawAnim(void)
 {
     UI_Rect rect;
+    char frame_text[6];
     uint8_t index;
     uint8_t phase;
     int16_t scan_span;
@@ -253,6 +345,10 @@ static void Page_Player_DrawAnim(void)
     sprite_y = (int16_t)(rect.y + 18 + (int16_t)((g_player_frame / 3U) % 24U));
     UI_DrawRect(sprite_x, sprite_y, PLAYER_SPRITE_SIZE, PLAYER_SPRITE_SIZE, UI_COLOR_ACCENT);
 
+    UI_DrawText(34, 58, "F", UI_COLOR_MUTED);
+    Page_Player_FormatU16(g_player_frame, frame_text, (uint8_t)sizeof(frame_text));
+    UI_DrawText(50, 58, frame_text, UI_COLOR_TEXT);
+
     base_y = (int16_t)(rect.y + rect.h - 14);
     for (index = 0U; index < PLAYER_WAVE_COUNT; index++)
     {
@@ -261,6 +357,37 @@ static void Page_Player_DrawAnim(void)
         bar_x = (int16_t)(rect.x + 18 + ((int16_t)index * 20));
         UI_DrawRect(bar_x, (int16_t)(base_y - bar_h), 10, bar_h, UI_COLOR_OK);
     }
+}
+
+/*
+ * Draw the dynamic PLAYER state panel.
+ *
+ * The panel uses the shared feedback helper so OK and RIGHT presses have the
+ * same short visual response style as settings value changes.
+ *
+ * Parameters:
+ * state_text: Current state text.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Draws state text and progress bar.
+ */
+static void Page_Player_DrawState(const char *state_text)
+{
+    UI_Rect rect;
+    uint16_t fill;
+
+    rect = Page_Player_GetStateRect();
+    fill = (UI_FeedbackIsActive(&rect, g_player_draw_now) != 0U) ?
+        UI_COLOR_SURFACE_2 :
+        UI_COLOR_BG;
+
+    UI_DrawRect(rect.x, rect.y, rect.w, rect.h, fill);
+    UI_DrawTextCN(30, 164, TEXT_STATE, UI_COLOR_MUTED);
+    UI_DrawTextCN(94, 164, state_text, UI_COLOR_TEXT);
+    UI_DrawProgressBar(30, 190, 180, g_player_progress, 100U);
 }
 
 /*
@@ -293,9 +420,7 @@ static void Page_Player_Draw(const UI_Rect *clip)
 
     UI_DrawStatusBar(TEXT_PLAYER_TITLE, UI_COLOR_ACCENT);
     Page_Player_DrawAnim();
-    UI_DrawTextCN(30, 164, TEXT_STATE, UI_COLOR_MUTED);
-    UI_DrawTextCN(94, 164, state_text, UI_COLOR_TEXT);
-    UI_DrawProgressBar(30, 190, 180, g_player_progress, 100U);
+    Page_Player_DrawState(state_text);
     UI_DrawFooter(TEXT_FOOTER_PLAYER);
 }
 
