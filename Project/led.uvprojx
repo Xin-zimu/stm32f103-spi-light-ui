@@ -565,6 +565,16 @@
               <FilePath>..\User\ui_draw.h</FilePath>
             </File>
             <File>
+              <FileName>ui_renderer.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\ui_renderer.c</FilePath>
+            </File>
+            <File>
+              <FileName>ui_renderer.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\ui_renderer.h</FilePath>
+            </File>
+            <File>
               <FileName>ui_page.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\ui_page.c</FilePath>

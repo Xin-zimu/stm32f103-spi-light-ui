@@ -6,6 +6,7 @@
 #include "ui_dirty.h"
 #include "ui_draw.h"
 #include "ui_feedback.h"
+#include "ui_renderer.h"
 
 static const UI_PageOps * const UI_PAGES[UI_PAGE_COUNT] =
 {
@@ -33,6 +34,7 @@ void UI_PageInit(void)
 {
     UI_DirtyInit();
     UI_FeedbackInit();
+    UI_RendererInit();
     g_ui_current_page = UI_PAGE_HOME;
     if (UI_PAGES[g_ui_current_page]->on_enter != 0)
     {
@@ -247,24 +249,11 @@ void UI_PageDispatchEvent(const UI_Event *event)
  */
 void UI_PageTask(uint32_t now)
 {
-    UI_Rect dirty;
-
     UI_FeedbackTask(now);
     if (UI_PAGES[g_ui_current_page]->task != 0)
     {
         UI_PAGES[g_ui_current_page]->task(now);
     }
 
-    if (UI_DirtyPop(&dirty) == 0U)
-    {
-        return;
-    }
-
-    if (UI_PAGES[g_ui_current_page]->draw != 0)
-    {
-        UI_DrawSetClip(&dirty);
-        UI_DrawClearClip(UI_COLOR_BG);
-        UI_PAGES[g_ui_current_page]->draw(&dirty);
-        UI_DrawSetClip(0);
-    }
+    UI_RendererTask(now, UI_PAGES[g_ui_current_page]);
 }

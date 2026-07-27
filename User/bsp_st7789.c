@@ -612,6 +612,49 @@ void ST7789_SetAddressWindow(
 }
 
 /*
+ * Put the ST7789 bus into data mode for pixel memory writes.
+ *
+ * ST7789_SetAddressWindow ends by sending RAMWR as a command, leaving DC low.
+ * External renderers that submit a prepared DMA pixel buffer must raise DC
+ * before starting SPI2 TX DMA, while command helpers continue to manage DC
+ * internally.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Drives PB14 high for following data bytes.
+ */
+void ST7789_BeginDataWrite(void)
+{
+    ST7789_DC_HIGH();
+}
+
+/*
+ * Wait until any active pixel transfer has fully left SPI2.
+ *
+ * DMA completion only means the last byte reached SPI2->DR. Before another
+ * address window or command is sent, the SPI BSY flag must also clear so the
+ * final pixel byte cannot be interpreted under the next DC state.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * May wait for DMA completion and SPI2 BSY to clear.
+ */
+void ST7789_WaitWriteComplete(void)
+{
+    ST7789_FinishBufferDMA();
+}
+
+/*
  * 使用一个 RGB565 颜色填充整个 240x240 可见区域。
  *
  * 函数预先构建两个相同的一行 RGB565 DMA 缓冲区并交替发送，不创建

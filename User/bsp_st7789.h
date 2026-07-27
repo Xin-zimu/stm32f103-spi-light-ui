@@ -44,6 +44,8 @@ void ST7789_SetAddressWindow(
     uint16_t x1,
     uint16_t y1
 );
+void ST7789_BeginDataWrite(void);
+void ST7789_WaitWriteComplete(void);
 void ST7789_Clear(uint16_t color);
 void ST7789_FillRect(
     uint16_t x,

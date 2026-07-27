@@ -2,6 +2,22 @@
 #include "bsp_st7789.h"
 #include "ui_font.h"
 
+typedef struct
+{
+    uint8_t *buffer;                    // Active RGB565 high-byte-first strip buffer.
+    UI_Rect strip;                      // Screen-space area covered by buffer.
+    UI_Rect clip;                       // Active draw clip inside the strip.
+    uint8_t active;                     // Nonzero while drawing into a buffer.
+} UI_DrawContext;
+
+static UI_DrawContext g_ui_draw_context =
+{
+    0,
+    {0, 0, (int16_t)UI_SCREEN_W, (int16_t)UI_SCREEN_H},
+    {0, 0, (int16_t)UI_SCREEN_W, (int16_t)UI_SCREEN_H},
+    0U
+};
+
 static UI_Rect g_ui_draw_clip =
 {
     0,
@@ -9,6 +25,160 @@ static UI_Rect g_ui_draw_clip =
     (int16_t)UI_SCREEN_W,
     (int16_t)UI_SCREEN_H
 };
+
+/*
+ * Clip a rectangle to the screen and active clip.
+ *
+ * The returned rectangle is safe for either direct ST7789 drawing or strip
+ * buffer writes. When a buffer context is active, the rectangle is also clipped
+ * to the current strip so row offsets cannot underflow.
+ *
+ * Parameters:
+ * rect: Rectangle to clip in place.
+ *
+ * Return value:
+ * 1: Rectangle remains non-empty.
+ * 0: Rectangle is empty or outside the drawable area.
+ *
+ * Side effects:
+ * Modifies rect.
+ */
+static uint8_t UI_DrawClipRect(UI_Rect *rect)
+{
+    int16_t right;
+    int16_t bottom;
+    int16_t clip_right;
+    int16_t clip_bottom;
+    const UI_Rect *clip;
+
+    if ((rect == 0) || (rect->w <= 0) || (rect->h <= 0) ||
+        (rect->x >= (int16_t)UI_SCREEN_W) || (rect->y >= (int16_t)UI_SCREEN_H))
+    {
+        return 0U;
+    }
+
+    if (rect->x < 0)
+    {
+        rect->w = (int16_t)(rect->w + rect->x);
+        rect->x = 0;
+    }
+    if (rect->y < 0)
+    {
+        rect->h = (int16_t)(rect->h + rect->y);
+        rect->y = 0;
+    }
+    if ((rect->x + rect->w) > (int16_t)UI_SCREEN_W)
+    {
+        rect->w = (int16_t)((int16_t)UI_SCREEN_W - rect->x);
+    }
+    if ((rect->y + rect->h) > (int16_t)UI_SCREEN_H)
+    {
+        rect->h = (int16_t)((int16_t)UI_SCREEN_H - rect->y);
+    }
+
+    clip = (g_ui_draw_context.active != 0U) ? &g_ui_draw_context.clip : &g_ui_draw_clip;
+    right = (int16_t)(rect->x + rect->w);
+    bottom = (int16_t)(rect->y + rect->h);
+    clip_right = (int16_t)(clip->x + clip->w);
+    clip_bottom = (int16_t)(clip->y + clip->h);
+    if ((right <= clip->x) || (bottom <= clip->y) ||
+        (rect->x >= clip_right) || (rect->y >= clip_bottom))
+    {
+        return 0U;
+    }
+
+    if (rect->x < clip->x)
+    {
+        rect->x = clip->x;
+    }
+    if (rect->y < clip->y)
+    {
+        rect->y = clip->y;
+    }
+    if (right > clip_right)
+    {
+        right = clip_right;
+    }
+    if (bottom > clip_bottom)
+    {
+        bottom = clip_bottom;
+    }
+
+    if (g_ui_draw_context.active != 0U)
+    {
+        const UI_Rect *strip;
+        int16_t strip_right;
+        int16_t strip_bottom;
+
+        strip = &g_ui_draw_context.strip;
+        strip_right = (int16_t)(strip->x + strip->w);
+        strip_bottom = (int16_t)(strip->y + strip->h);
+        if ((right <= strip->x) || (bottom <= strip->y) ||
+            (rect->x >= strip_right) || (rect->y >= strip_bottom))
+        {
+            return 0U;
+        }
+        if (rect->x < strip->x)
+        {
+            rect->x = strip->x;
+        }
+        if (rect->y < strip->y)
+        {
+            rect->y = strip->y;
+        }
+        if (right > strip_right)
+        {
+            right = strip_right;
+        }
+        if (bottom > strip_bottom)
+        {
+            bottom = strip_bottom;
+        }
+    }
+
+    rect->w = (int16_t)(right - rect->x);
+    rect->h = (int16_t)(bottom - rect->y);
+
+    return ((rect->w > 0) && (rect->h > 0)) ? 1U : 0U;
+}
+
+/*
+ * Fill a clipped rectangle inside the active strip buffer.
+ *
+ * The strip buffer is always APP_LCD_WIDTH pixels wide so offsets stay simple
+ * and line strides are stable across full-screen and local dirty redraws.
+ *
+ * Parameters:
+ * rect: Clipped screen-space rectangle.
+ * color: RGB565 fill color.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Writes RGB565 high-byte-first pixels into g_ui_draw_context.buffer.
+ */
+static void UI_DrawRectToBuffer(const UI_Rect *rect, uint16_t color)
+{
+    int16_t row;
+    int16_t col;
+    uint16_t offset;
+    uint8_t high;
+    uint8_t low;
+
+    high = (uint8_t)(color >> 8);
+    low = (uint8_t)color;
+    for (row = 0; row < rect->h; row++)
+    {
+        offset = (uint16_t)((((rect->y - g_ui_draw_context.strip.y) + row) *
+                             (int16_t)UI_SCREEN_W + rect->x) * 2);
+        for (col = 0; col < rect->w; col++)
+        {
+            g_ui_draw_context.buffer[offset++] = high;
+            g_ui_draw_context.buffer[offset++] = low;
+        }
+    }
+}
 
 /*
  * Clear the full visible display.
@@ -20,11 +190,65 @@ static UI_Rect g_ui_draw_clip =
  * None.
  *
  * Side effects:
- * Replaces the full ST7789 visible area.
+ * Replaces the full ST7789 visible area or active buffer context.
  */
 void UI_DrawClear(uint16_t color)
 {
-    ST7789_Clear(color);
+    if (g_ui_draw_context.active != 0U)
+    {
+        UI_DrawRect(0, 0, (int16_t)UI_SCREEN_W, (int16_t)UI_SCREEN_H, color);
+    }
+    else
+    {
+        ST7789_Clear(color);
+    }
+}
+
+/*
+ * Begin drawing into a renderer-owned strip buffer.
+ *
+ * Parameters:
+ * buffer: RGB565 high-byte-first storage for one strip.
+ * strip: Screen-space strip covered by buffer.
+ * clip: Drawable area, normally the same as strip.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Replaces the module-local drawing backend until UI_DrawEndBuffer is called.
+ */
+void UI_DrawBeginBuffer(uint8_t *buffer, const UI_Rect *strip, const UI_Rect *clip)
+{
+    if ((buffer == 0) || (strip == 0) || (clip == 0))
+    {
+        return;
+    }
+
+    g_ui_draw_context.buffer = buffer;
+    g_ui_draw_context.strip = *strip;
+    g_ui_draw_context.clip = *clip;
+    g_ui_draw_context.active = 1U;
+    g_ui_draw_clip = *clip;
+}
+
+/*
+ * Finish drawing into a renderer-owned strip buffer.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Restores direct ST7789 drawing as the fallback backend.
+ */
+void UI_DrawEndBuffer(void)
+{
+    g_ui_draw_context.buffer = 0;
+    g_ui_draw_context.active = 0U;
+    UI_DrawSetClip(0);
 }
 
 /*
@@ -51,10 +275,18 @@ void UI_DrawSetClip(const UI_Rect *clip)
         g_ui_draw_clip.y = 0;
         g_ui_draw_clip.w = (int16_t)UI_SCREEN_W;
         g_ui_draw_clip.h = (int16_t)UI_SCREEN_H;
+        if (g_ui_draw_context.active != 0U)
+        {
+            g_ui_draw_context.clip = g_ui_draw_context.strip;
+        }
         return;
     }
 
     g_ui_draw_clip = *clip;
+    if (g_ui_draw_context.active != 0U)
+    {
+        g_ui_draw_context.clip = *clip;
+    }
 }
 
 /*
@@ -88,70 +320,28 @@ void UI_DrawClearClip(uint16_t color)
  * None.
  *
  * Side effects:
- * Draws within the ST7789 visible area.
+ * Draws within the active buffer or ST7789 visible area.
  */
 void UI_DrawRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)
 {
-    int16_t right;
-    int16_t bottom;
-    int16_t clip_right;
-    int16_t clip_bottom;
+    UI_Rect rect;
 
-    if ((w <= 0) || (h <= 0) || (x >= (int16_t)UI_SCREEN_W) || (y >= (int16_t)UI_SCREEN_H))
-    {
-        return;
-    }
-    if (x < 0)
-    {
-        w = (int16_t)(w + x);
-        x = 0;
-    }
-    if (y < 0)
-    {
-        h = (int16_t)(h + y);
-        y = 0;
-    }
-    if ((x + w) > (int16_t)UI_SCREEN_W)
-    {
-        w = (int16_t)((int16_t)UI_SCREEN_W - x);
-    }
-    if ((y + h) > (int16_t)UI_SCREEN_H)
-    {
-        h = (int16_t)((int16_t)UI_SCREEN_H - y);
-    }
-
-    right = (int16_t)(x + w);
-    bottom = (int16_t)(y + h);
-    clip_right = (int16_t)(g_ui_draw_clip.x + g_ui_draw_clip.w);
-    clip_bottom = (int16_t)(g_ui_draw_clip.y + g_ui_draw_clip.h);
-    if ((right <= g_ui_draw_clip.x) || (bottom <= g_ui_draw_clip.y) ||
-        (x >= clip_right) || (y >= clip_bottom))
+    rect.x = x;
+    rect.y = y;
+    rect.w = w;
+    rect.h = h;
+    if (UI_DrawClipRect(&rect) == 0U)
     {
         return;
     }
 
-    if (x < g_ui_draw_clip.x)
+    if (g_ui_draw_context.active != 0U)
     {
-        x = g_ui_draw_clip.x;
+        UI_DrawRectToBuffer(&rect, color);
     }
-    if (y < g_ui_draw_clip.y)
+    else
     {
-        y = g_ui_draw_clip.y;
-    }
-    if (right > clip_right)
-    {
-        right = clip_right;
-    }
-    if (bottom > clip_bottom)
-    {
-        bottom = clip_bottom;
-    }
-    w = (int16_t)(right - x);
-    h = (int16_t)(bottom - y);
-
-    if ((w > 0) && (h > 0))
-    {
-        ST7789_FillRect((uint16_t)x, (uint16_t)y, (uint16_t)w, (uint16_t)h, color);
+        ST7789_FillRect((uint16_t)rect.x, (uint16_t)rect.y, (uint16_t)rect.w, (uint16_t)rect.h, color);
     }
 }
 
@@ -192,7 +382,7 @@ void UI_DrawFrame(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)
  * None.
  *
  * Side effects:
- * Draws glyph pixels with ST7789 rectangles.
+ * Draws glyph pixels through the clipped rectangle primitive.
  */
 static void UI_DrawChar(int16_t x, int16_t y, char ch, uint16_t color)
 {
@@ -207,13 +397,7 @@ static void UI_DrawChar(int16_t x, int16_t y, char ch, uint16_t color)
         {
             if ((glyph[column] & (uint8_t)(1U << row)) != 0U)
             {
-                UI_DrawRect(
-                    (int16_t)(x + 1 + column),
-                    (int16_t)(y + 2 + row),
-                    1,
-                    1,
-                    color
-                );
+                UI_DrawRect((int16_t)(x + 1 + column), (int16_t)(y + 2 + row), 1, 1, color);
             }
         }
     }
@@ -327,7 +511,7 @@ static void UI_DrawChineseChar(int16_t x, int16_t y, uint16_t gb2312_code, uint1
  * None.
  *
  * Side effects:
- * Draws text on the ST7789.
+ * Draws text through the current backend.
  */
 void UI_DrawText(int16_t x, int16_t y, const char *text, uint16_t color)
 {
@@ -358,7 +542,7 @@ void UI_DrawText(int16_t x, int16_t y, const char *text, uint16_t color)
  * None.
  *
  * Side effects:
- * Draws scaled ASCII text on the ST7789.
+ * Draws scaled ASCII text through the current backend.
  */
 void UI_DrawTextLarge(int16_t x, int16_t y, const char *text, uint16_t color)
 {
@@ -393,7 +577,7 @@ void UI_DrawTextLarge(int16_t x, int16_t y, const char *text, uint16_t color)
  * None.
  *
  * Side effects:
- * Draws mixed text on the ST7789.
+ * Draws mixed text through the current backend.
  */
 void UI_DrawTextCN(int16_t x, int16_t y, const char *text, uint16_t color)
 {
