@@ -67,20 +67,20 @@ static void Page_Settings_InvalidateRow(uint8_t index)
 }
 
 /*
- * Mark a settings focus animation rectangle dirty.
+ * Mark a settings focus animation row range dirty.
  *
  * Parameters:
- * dirty: Rectangle produced by the focus animation task.
+ * dirty: Row-level rectangle produced by the focus animation task.
  *
  * Return value:
  * None.
  *
  * Side effects:
- * Queues local repaint for the animated marker.
+ * Queues local repaint that can merge with pending row cleanup.
  */
 static void Page_Settings_InvalidateAnim(const UI_Rect *dirty)
 {
-    UI_DirtyAddIsolated(dirty);
+    UI_DirtyAdd(dirty);
 }
 
 /*

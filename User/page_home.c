@@ -63,20 +63,20 @@ static void Page_Home_InvalidateRow(uint8_t index)
 }
 
 /*
- * Mark a focus animation rectangle dirty.
+ * Mark a focus animation row range dirty.
  *
  * Parameters:
- * dirty: Rectangle produced by the focus animation task.
+ * dirty: Row-level rectangle produced by the focus animation task.
  *
  * Return value:
  * None.
  *
  * Side effects:
- * Queues local repaint for the animated marker.
+ * Queues local repaint that can merge with pending row cleanup.
  */
 static void Page_Home_InvalidateAnim(const UI_Rect *dirty)
 {
-    UI_DirtyAddIsolated(dirty);
+    UI_DirtyAdd(dirty);
 }
 
 /*

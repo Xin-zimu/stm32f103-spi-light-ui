@@ -7,6 +7,7 @@
 
 #define UI_RENDER_STRIP_BYTES \
     (APP_LCD_WIDTH * APP_UI_STRIP_HEIGHT * 2U)
+#define UI_RENDER_TASK_STEP_LIMIT       16U      // Cooperative state steps per task call.
 
 typedef enum
 {
@@ -241,9 +242,10 @@ void UI_RendererInit(void)
 /*
  * Service the UI strip renderer state machine.
  *
- * Each call advances only a bounded amount of work. If LCD DMA is still moving
- * pixels, the function returns so key scanning and page animation can continue
- * in the cooperative main loop.
+ * Each call advances through cheap CPU-only states until a strip is submitted
+ * to DMA, DMA is still busy, no dirty work remains, or the cooperative step
+ * limit is reached. This keeps key scanning responsive while avoiding the old
+ * one-state-per-call delay that let focus movement outrun row cleanup.
  *
  * Parameters:
  * now: Current scheduler timestamp, reserved for later renderer statistics.
@@ -257,64 +259,71 @@ void UI_RendererInit(void)
  */
 void UI_RendererTask(uint32_t now, const UI_PageOps *page)
 {
+    uint8_t steps;
+
     (void)now;
 
     LCD_DMA_Task();
-    switch (g_ui_renderer.state)
+    steps = UI_RENDER_TASK_STEP_LIMIT;
+    while (steps > 0U)
     {
-        case UI_RENDER_IDLE:
-            if (UI_DirtyPop(&g_ui_renderer.dirty) == 0U)
-            {
-                return;
-            }
-            g_ui_renderer.next_y = g_ui_renderer.dirty.y;
-            g_ui_renderer.state = UI_RENDER_PREPARE_STRIP;
-            break;
+        steps--;
+        switch (g_ui_renderer.state)
+        {
+            case UI_RENDER_IDLE:
+                if (UI_DirtyPop(&g_ui_renderer.dirty) == 0U)
+                {
+                    return;
+                }
+                g_ui_renderer.next_y = g_ui_renderer.dirty.y;
+                g_ui_renderer.state = UI_RENDER_PREPARE_STRIP;
+                break;
 
-        case UI_RENDER_PREPARE_STRIP:
-            if (UI_RendererPrepareStrip() == 0U)
-            {
+            case UI_RENDER_PREPARE_STRIP:
+                if (UI_RendererPrepareStrip() == 0U)
+                {
+                    g_ui_renderer.state = UI_RENDER_IDLE;
+                    break;
+                }
+                g_ui_renderer.state = UI_RENDER_DRAW_STRIP;
+                break;
+
+            case UI_RENDER_DRAW_STRIP:
+                if (UI_RendererFindFreeBuffer(&g_ui_renderer.buffer_index) == 0U)
+                {
+                    return;
+                }
+                UI_RendererDrawStrip(page);
+                g_ui_renderer.state = UI_RENDER_SUBMIT_DMA;
+                break;
+
+            case UI_RENDER_SUBMIT_DMA:
+                if (UI_RendererSubmitStrip() == 0U)
+                {
+                    return;
+                }
+                g_ui_renderer.state = UI_RENDER_WAIT_DMA;
+                return;
+
+            case UI_RENDER_WAIT_DMA:
+                if (LCD_DMA_IsBusy() != 0U)
+                {
+                    return;
+                }
+                ST7789_WaitWriteComplete();
+                g_ui_strip_buffers[g_ui_renderer.buffer_index].state = UI_BUFFER_FREE;
+                g_ui_renderer.state = UI_RENDER_NEXT_STRIP;
+                break;
+
+            case UI_RENDER_NEXT_STRIP:
+                g_ui_renderer.next_y = (int16_t)(g_ui_renderer.strip.y + g_ui_renderer.strip.h);
+                g_ui_renderer.state = UI_RENDER_PREPARE_STRIP;
+                break;
+
+            default:
                 g_ui_renderer.state = UI_RENDER_IDLE;
-                return;
-            }
-            g_ui_renderer.state = UI_RENDER_DRAW_STRIP;
-            break;
-
-        case UI_RENDER_DRAW_STRIP:
-            if (UI_RendererFindFreeBuffer(&g_ui_renderer.buffer_index) == 0U)
-            {
-                return;
-            }
-            UI_RendererDrawStrip(page);
-            g_ui_renderer.state = UI_RENDER_SUBMIT_DMA;
-            break;
-
-        case UI_RENDER_SUBMIT_DMA:
-            if (UI_RendererSubmitStrip() == 0U)
-            {
-                return;
-            }
-            g_ui_renderer.state = UI_RENDER_WAIT_DMA;
-            break;
-
-        case UI_RENDER_WAIT_DMA:
-            if (LCD_DMA_IsBusy() != 0U)
-            {
-                return;
-            }
-            ST7789_WaitWriteComplete();
-            g_ui_strip_buffers[g_ui_renderer.buffer_index].state = UI_BUFFER_FREE;
-            g_ui_renderer.state = UI_RENDER_NEXT_STRIP;
-            break;
-
-        case UI_RENDER_NEXT_STRIP:
-            g_ui_renderer.next_y = (int16_t)(g_ui_renderer.strip.y + g_ui_renderer.strip.h);
-            g_ui_renderer.state = UI_RENDER_PREPARE_STRIP;
-            break;
-
-        default:
-            g_ui_renderer.state = UI_RENDER_IDLE;
-            break;
+                break;
+        }
     }
 }
 

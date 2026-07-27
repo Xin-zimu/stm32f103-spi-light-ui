@@ -33,18 +33,17 @@ static uint16_t UI_AnimEaseOutCubic(uint32_t elapsed_ms, uint16_t duration_ms)
 }
 
 /*
- * Build a dirty rectangle covering only old and new focus marker positions.
+ * Build a row-level dirty rectangle for old and new focus marker positions.
  *
- * The focus marker is a five-pixel strip. Repainting the full menu row while
- * the strip animates forces Chinese text and row backgrounds through the LCD
- * on every frame, which is visible as jitter on STM32F103. This rectangle is
- * intentionally narrow so animation frames only erase and redraw the marker
- * strip.
+ * The strip renderer currently sends full-width bands for each dirty Y range.
+ * A narrow marker-only dirty rectangle would still become a full-width DMA
+ * transfer, but it would not merge with pending row cleanup. Covering complete
+ * rows lets selection background and moving marker pixels repaint together.
  *
  * Parameters:
  * old_y: Previous marker Y coordinate.
  * new_y: New marker Y coordinate.
- * dirty: Receives the marker repaint rectangle.
+ * dirty: Receives the row-level repaint rectangle.
  *
  * Return value:
  * None.
@@ -60,10 +59,10 @@ static void UI_FocusAnimBuildDirty(int16_t old_y, int16_t new_y, UI_Rect *dirty)
     top = (old_y < new_y) ? old_y : new_y;
     bottom = (old_y > new_y) ? old_y : new_y;
 
-    dirty->x = 12;
-    dirty->y = (int16_t)(top + 4);
-    dirty->w = 5;
-    dirty->h = (int16_t)((bottom - top) + (int16_t)UI_ROW_H - 8);
+    dirty->x = 0;
+    dirty->y = top;
+    dirty->w = (int16_t)UI_SCREEN_W;
+    dirty->h = (int16_t)((bottom - top) + (int16_t)UI_ROW_H);
 }
 
 /*
