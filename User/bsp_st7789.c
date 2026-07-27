@@ -1,5 +1,7 @@
+#include "app_config.h"
 #include "bsp_st7789.h"
 #include "delay.h"
+#include "lcd_dma.h"
 
 #define ST7789_GPIO_PORT            GPIOB
 #define ST7789_GPIO_CLK             RCC_APB2Periph_GPIOB
@@ -18,17 +20,10 @@
 #define ST7789_BLK_HIGH()           GPIO_SetBits(ST7789_GPIO_PORT, ST7789_BLK_PIN)
 #define ST7789_BLK_LOW()            GPIO_ResetBits(ST7789_GPIO_PORT, ST7789_BLK_PIN)
 
-#define ST7789_SPI_DMA_CHANNEL       DMA1_Channel5       // SPI2 TX DMA channel.
-#define ST7789_SPI_DMA_IRQ           DMA1_Channel5_IRQn   // SPI2 TX DMA interrupt.
-#define ST7789_SPI_DMA_CLEAR_IT      DMA1_IT_GL5          // Clears channel 5 pending bits.
-#define ST7789_SPI_DMA_TC_IT         DMA1_IT_TC5          // Transfer complete interrupt.
-#define ST7789_SPI_DMA_TE_IT         DMA1_IT_TE5          // Transfer error interrupt.
-#define ST7789_LINE_BUFFER_COUNT     2U                   // Double-buffered line count.
-#define ST7789_LINE_BUFFER_SIZE      (ST7789_WIDTH * 2U)  // One RGB565 display line.
+#define ST7789_LINE_BUFFER_COUNT     APP_LCD_DMA_LINE_BUFFERS // Double-buffered line count.
+#define ST7789_LINE_BUFFER_SIZE      (ST7789_WIDTH * 2U)      // One RGB565 display line.
 
 static uint8_t ST7789_LINE_BUFFER[ST7789_LINE_BUFFER_COUNT][ST7789_LINE_BUFFER_SIZE];
-static volatile uint8_t ST7789_SPI_DMA_BUSY = 0U;
-static volatile uint8_t ST7789_SPI_DMA_ERROR = 0U;
 
 typedef enum
 {
@@ -121,11 +116,8 @@ void ST7789_GPIO_Init(void)
 void ST7789_SPI_Init(void)
 {
     SPI_InitTypeDef spi;
-    DMA_InitTypeDef dma;
-    NVIC_InitTypeDef nvic;
 
     RCC_APB1PeriphClockCmd(ST7789_SPI_CLK, ENABLE);
-    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
     SPI_I2S_DeInit(SPI2);
 
     spi.SPI_Direction = SPI_Direction_1Line_Tx;
@@ -147,32 +139,7 @@ void ST7789_SPI_Init(void)
 
     SPI_Init(SPI2, &spi);
     SPI_NSSInternalSoftwareConfig(SPI2, SPI_NSSInternalSoft_Set);
-
-    DMA_DeInit(ST7789_SPI_DMA_CHANNEL);
-    dma.DMA_PeripheralBaseAddr = (uint32_t)&SPI2->DR;
-    dma.DMA_MemoryBaseAddr = (uint32_t)ST7789_LINE_BUFFER[0];
-    dma.DMA_DIR = DMA_DIR_PeripheralDST;
-    dma.DMA_BufferSize = 1U;
-    dma.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
-    dma.DMA_MemoryInc = DMA_MemoryInc_Enable;
-    dma.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
-    dma.DMA_MemoryDataSize = DMA_MemoryDataSize_Byte;
-    dma.DMA_Mode = DMA_Mode_Normal;
-    dma.DMA_Priority = DMA_Priority_High;
-    dma.DMA_M2M = DMA_M2M_Disable;
-    DMA_Init(ST7789_SPI_DMA_CHANNEL, &dma);
-    DMA_ITConfig(ST7789_SPI_DMA_CHANNEL, DMA_IT_TC | DMA_IT_TE, ENABLE);
-    DMA_ClearITPendingBit(ST7789_SPI_DMA_CLEAR_IT);
-
-    nvic.NVIC_IRQChannel = ST7789_SPI_DMA_IRQ;
-    nvic.NVIC_IRQChannelPreemptionPriority = 2U;
-    nvic.NVIC_IRQChannelSubPriority = 1U;
-    nvic.NVIC_IRQChannelCmd = ENABLE;
-    NVIC_Init(&nvic);
-
-    ST7789_SPI_DMA_BUSY = 0U;
-    ST7789_SPI_DMA_ERROR = 0U;
-    SPI_I2S_DMACmd(SPI2, SPI_I2S_DMAReq_Tx, ENABLE);
+    LCD_DMA_Init();
 
     SPI_Cmd(SPI2, ENABLE);
 }
@@ -229,34 +196,29 @@ static void ST7789_WaitStreamComplete(void)
 /*
  * Check whether SPI2 TX DMA can accept a new buffer.
  *
- * The busy flag is released by DMA1_Channel5_IRQHandler, so this helper lets
- * asynchronous producers return to the main loop instead of waiting for a
- * transfer-complete flag in a tight polling loop.
+ * The LCD DMA module owns the channel state. Running its task first releases a
+ * completed transfer from COMPLETE_PENDING to IDLE, which lets synchronous
+ * legacy drawing code start the next line without duplicating DMA state here.
  *
  * Parameters:
  * None.
  *
  * Return value:
  * 1: DMA1 Channel5 is idle.
- * 0: DMA1 Channel5 is still transmitting.
+ * 0: DMA1 Channel5 is still transmitting or recovering.
  */
 static uint8_t ST7789_IsDMAReady(void)
 {
-    if (ST7789_SPI_DMA_BUSY != 0U)
-    {
-        return 0U;
-    }
-
-    return 1U;
+    LCD_DMA_Task();
+    return (LCD_DMA_IsBusy() == 0U) ? 1U : 0U;
 }
 
 /*
- * Recover the SPI2 TX DMA channel after a transfer error.
+ * Ask the LCD DMA module to recover after a transfer error.
  *
- * Transfer errors are rare, but leaving the SPI DMA request or channel in an
- * unknown state can make the next frame hang. Recovery disables the channel,
- * clears all pending channel interrupts, toggles the SPI2 TX DMA request, and
- * resets the software state before the next transfer is queued.
+ * ST7789 keeps this wrapper so older image and delta paths do not touch the
+ * new DMA state machine directly. Actual channel disable, pending-bit clear,
+ * and SPI2 DMA request recovery are handled by LCD_DMA_Task.
  *
  * Parameters:
  * None.
@@ -265,24 +227,20 @@ static uint8_t ST7789_IsDMAReady(void)
  * None.
  *
  * Side effects:
- * Reinitializes the active DMA request path state for SPI2_TX.
+ * May recover DMA1 Channel5 through the LCD DMA module.
  */
 static void ST7789_RecoverDMA(void)
 {
-    DMA_Cmd(ST7789_SPI_DMA_CHANNEL, DISABLE);
-    DMA_ClearITPendingBit(ST7789_SPI_DMA_CLEAR_IT);
-    SPI_I2S_DMACmd(SPI2, SPI_I2S_DMAReq_Tx, DISABLE);
-    SPI_I2S_DMACmd(SPI2, SPI_I2S_DMAReq_Tx, ENABLE);
-    ST7789_SPI_DMA_BUSY = 0U;
-    ST7789_SPI_DMA_ERROR = 0U;
+    LCD_DMA_Task();
 }
 
 /*
- * Wait until the active SPI2 TX DMA transfer has raised its interrupt.
+ * Wait until the active SPI2 TX DMA transfer is fully released.
  *
- * DMA1 Channel5_IRQHandler clears ST7789_SPI_DMA_BUSY on transfer-complete
- * or transfer-error. The wait uses WFI instead of polling the DMA status
- * register, then recovers the DMA request path if the interrupt reported TE.
+ * This compatibility wrapper keeps the current blocking ST7789 drawing API
+ * intact while the DMA state machine lives in lcd_dma.c. LCD_DMA_WaitReady
+ * also runs the DMA task before sleeping, preventing a COMPLETE_PENDING state
+ * from being missed after the interrupt has already fired.
  *
  * Parameters:
  * None.
@@ -292,23 +250,15 @@ static void ST7789_RecoverDMA(void)
  */
 static void ST7789_WaitDMAReady(void)
 {
-    while (ST7789_IsDMAReady() == 0U)
-    {
-        __WFI();
-    }
-
-    if (ST7789_SPI_DMA_ERROR != 0U)
-    {
-        ST7789_RecoverDMA();
-    }
+    LCD_DMA_WaitReady();
 }
 
 /*
  * Try to start one SPI2 TX DMA transfer from a prepared buffer.
  *
- * The function never waits for a previous transfer. It either starts the DMA
- * channel immediately or reports that the caller should return and try again
- * after DMA1_Channel5_IRQHandler releases the busy flag.
+ * The ST7789 driver has already set the address window and DC data mode before
+ * this helper is called. It packages the byte buffer into an LCD_DMA_Transfer
+ * and lets lcd_dma.c own all DMA channel registers and error recovery.
  *
  * Parameters:
  * data: First byte to send through SPI2.
@@ -319,29 +269,27 @@ static void ST7789_WaitDMAReady(void)
  * 0: Parameters are invalid or DMA is still busy.
  *
  * Side effects:
- * Reprograms and enables DMA1 Channel5 for SPI2_TX.
+ * May start DMA1 Channel5 through LCD_DMA_Start.
  */
 static uint8_t ST7789_TryStartBufferDMA(const uint8_t *data, uint16_t length)
 {
+    LCD_DMA_Transfer transfer;
+
     if ((data == 0) || (length == 0U) || (ST7789_IsDMAReady() == 0U))
     {
         return 0U;
     }
 
-    if (ST7789_SPI_DMA_ERROR != 0U)
-    {
-        ST7789_RecoverDMA();
-    }
+    transfer.x = 0U;
+    transfer.y = 0U;
+    transfer.width = 0U;
+    transfer.height = 0U;
+    transfer.data = data;
+    transfer.data_length = length;
+    transfer.callback = 0;
+    transfer.user_data = 0;
 
-    ST7789_SPI_DMA_ERROR = 0U;
-    ST7789_SPI_DMA_BUSY = 1U;
-    DMA_Cmd(ST7789_SPI_DMA_CHANNEL, DISABLE);
-    DMA_ClearITPendingBit(ST7789_SPI_DMA_CLEAR_IT);
-    ST7789_SPI_DMA_CHANNEL->CMAR = (uint32_t)data;
-    ST7789_SPI_DMA_CHANNEL->CNDTR = length;
-    DMA_Cmd(ST7789_SPI_DMA_CHANNEL, ENABLE);
-
-    return 1U;
+    return LCD_DMA_Start(&transfer);
 }
 
 /*
@@ -1019,7 +967,7 @@ uint8_t ST7789_AnimDeltaStart(
         return 0U;
     }
 
-    if (ST7789_SPI_DMA_ERROR != 0U)
+    if (LCD_DMA_GetState() == LCD_DMA_STATE_ERROR)
     {
         ST7789_RecoverDMA();
     }
@@ -1101,7 +1049,7 @@ ST7789_AnimDeltaResult ST7789_AnimDeltaTask(void)
         {
             return ST7789_ANIM_DELTA_RESULT_BUSY;
         }
-        if (ST7789_SPI_DMA_ERROR != 0U)
+        if (LCD_DMA_GetState() == LCD_DMA_STATE_ERROR)
         {
             ST7789_RecoverDMA();
             ST7789_ANIM_DELTA_JOB.state = ST7789_ANIM_DELTA_ERROR;
@@ -1219,36 +1167,6 @@ ST7789_AnimDeltaResult ST7789_AnimDeltaTask(void)
     return ST7789_ANIM_DELTA_RESULT_DONE;
 }
 
-/*
- * Handle SPI2 TX DMA completion.
- *
- * STM32F103 maps SPI2_TX to DMA1 Channel5. The interrupt stops the channel,
- * records transfer-error status when present, clears all pending channel bits,
- * and releases the busy flag so the producer can start the next line buffer.
- *
- * Parameters:
- * None.
- *
- * Return value:
- * None.
- *
- * Side effects:
- * Updates ST7789_SPI_DMA_BUSY and ST7789_SPI_DMA_ERROR.
- */
-void DMA1_Channel5_IRQHandler(void)
-{
-    if ((DMA_GetITStatus(ST7789_SPI_DMA_TC_IT) != RESET) ||
-        (DMA_GetITStatus(ST7789_SPI_DMA_TE_IT) != RESET))
-    {
-        if (DMA_GetITStatus(ST7789_SPI_DMA_TE_IT) != RESET)
-        {
-            ST7789_SPI_DMA_ERROR = 1U;
-        }
-        DMA_Cmd(ST7789_SPI_DMA_CHANNEL, DISABLE);
-        DMA_ClearITPendingBit(ST7789_SPI_DMA_CLEAR_IT);
-        ST7789_SPI_DMA_BUSY = 0U;
-    }
-}
 
 /*
  * ³õÊ¼»¯ 240x240 RGB565 ST7789 ÆÁÄ»¡£

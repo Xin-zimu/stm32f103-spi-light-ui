@@ -3,7 +3,7 @@
 
 #include "ui_types.h"
 
-#define UI_DIRTY_MAX_RECTS       8U       // Maximum tracked local refresh areas.
+#define UI_DIRTY_MAX_RECTS       APP_UI_DIRTY_RECT_MAX       // Maximum tracked local refresh areas.
 
 void UI_DirtyInit(void);
 void UI_DirtyAdd(const UI_Rect *rect);

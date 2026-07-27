@@ -1,15 +1,16 @@
 #ifndef __UI_TYPES_H
 #define __UI_TYPES_H
 
+#include "app_config.h"
 #include "stm32f10x.h"
 
-#define UI_SCREEN_W          240U     // ST7789 visible width.
-#define UI_SCREEN_H          240U     // ST7789 visible height.
-#define UI_STATUS_H           32U     // Top status bar height.
-#define UI_FOOTER_H           28U     // Bottom hint area height.
-#define UI_MARGIN             12U     // Standard outer margin.
-#define UI_ROW_H              48U     // Standard row height.
-#define UI_ROW_GAP             6U     // Gap between rows.
+#define UI_SCREEN_W          APP_LCD_WIDTH       // ST7789 visible width.
+#define UI_SCREEN_H          APP_LCD_HEIGHT      // ST7789 visible height.
+#define UI_STATUS_H          APP_UI_STATUS_H     // Top status bar height.
+#define UI_FOOTER_H          APP_UI_FOOTER_H     // Bottom hint area height.
+#define UI_MARGIN            APP_UI_MARGIN       // Standard outer margin.
+#define UI_ROW_H             APP_UI_ROW_H        // Standard row height.
+#define UI_ROW_GAP           APP_UI_ROW_GAP      // Gap between rows.
 
 #define UI_COLOR_BG        0x0841U    // Dark neutral background.
 #define UI_COLOR_SURFACE   0x2104U    // Primary surface color.

@@ -1,10 +1,11 @@
 #ifndef __UI_EVENT_H
 #define __UI_EVENT_H
 
+#include "app_config.h"
 #include "key_driver.h"
 #include "stm32f10x.h"
 
-#define UI_EVENT_QUEUE_SIZE       16U      // Fixed ring queue capacity.
+#define UI_EVENT_QUEUE_SIZE       APP_UI_EVENT_QUEUE_SIZE       // Fixed ring queue capacity.
 
 typedef enum
 {

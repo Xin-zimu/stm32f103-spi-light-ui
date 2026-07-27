@@ -3,8 +3,8 @@
 
 #include "ui_types.h"
 
-#define UI_FOCUS_ANIM_MS      160U     // Focus slide duration in milliseconds.
-#define UI_FOCUS_ANIM_STEP_MS  16U     // Minimum repaint interval while animating.
+#define UI_FOCUS_ANIM_MS      APP_UI_FOCUS_ANIMATION_MS        // Focus slide duration.
+#define UI_FOCUS_ANIM_STEP_MS APP_UI_FOCUS_ANIMATION_STEP_MS   // Minimum repaint interval.
 
 typedef struct
 {

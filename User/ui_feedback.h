@@ -3,7 +3,7 @@
 
 #include "ui_types.h"
 
-#define UI_FEEDBACK_MS        60U      // Visual press feedback duration.
+#define UI_FEEDBACK_MS        APP_UI_FEEDBACK_MS      // Visual press feedback duration.
 
 void UI_FeedbackInit(void);
 void UI_FeedbackPress(const UI_Rect *rect, uint32_t now);

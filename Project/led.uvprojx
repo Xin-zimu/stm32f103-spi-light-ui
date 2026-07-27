@@ -475,6 +475,21 @@
               <FilePath>..\User\bsp_st7789.h</FilePath>
             </File>
             <File>
+              <FileName>app_config.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\app_config.h</FilePath>
+            </File>
+            <File>
+              <FileName>lcd_dma.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\lcd_dma.c</FilePath>
+            </File>
+            <File>
+              <FileName>lcd_dma.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\lcd_dma.h</FilePath>
+            </File>
+            <File>
               <FileName>key_driver.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\key_driver.c</FilePath>

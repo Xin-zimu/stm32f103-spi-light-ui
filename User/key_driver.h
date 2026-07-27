@@ -1,14 +1,15 @@
 #ifndef __KEY_DRIVER_H
 #define __KEY_DRIVER_H
 
+#include "app_config.h"
 #include "stm32f10x.h"
 
-#define KEY_SCAN_INTERVAL_MS      10U      // Key scan period in milliseconds.
-#define KEY_DEBOUNCE_MS           20U      // Stable time required before state changes.
-#define KEY_LONG_PRESS_MS        600U      // Long press event threshold.
-#define KEY_REPEAT_DELAY_MS      350U      // First repeat delay for direction keys.
-#define KEY_REPEAT_INTERVAL_MS   100U      // Repeat interval after the first repeat.
-#define KEY_RST_RESET_MS        2000U      // RST hold time before system reset event.
+#define KEY_SCAN_INTERVAL_MS      APP_KEY_SCAN_INTERVAL_MS      // Key scan period.
+#define KEY_DEBOUNCE_MS           APP_KEY_DEBOUNCE_MS           // Stable time before changes.
+#define KEY_LONG_PRESS_MS         APP_KEY_LONG_PRESS_MS         // Long press threshold.
+#define KEY_REPEAT_DELAY_MS       APP_KEY_REPEAT_DELAY_MS       // First direction repeat delay.
+#define KEY_REPEAT_INTERVAL_MS    APP_KEY_REPEAT_INTERVAL_MS    // Direction repeat interval.
+#define KEY_RST_RESET_MS          APP_KEY_RST_RESET_MS          // RST hold time before reset.
 
 typedef enum
 {
