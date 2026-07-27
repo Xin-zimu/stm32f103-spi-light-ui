@@ -15,8 +15,8 @@ static UI_DirtyStats g_ui_dirty_stats;
 /*
  * Update the maximum observed pending dirty count.
  *
- * The value is used as a lightweight load indicator while tuning UI and GIF
- * refresh scheduling. It only tracks local dirty rectangles because a pending
+ * The value is used as a lightweight load indicator while tuning UI refresh
+ * scheduling. It only tracks local dirty rectangles because a pending
  * full-screen refresh clears the local list by design.
  *
  * Parameters:
@@ -454,8 +454,8 @@ void UI_DirtyClear(void)
 /*
  * Read current dirty queue statistics.
  *
- * This accessor lets later GIF/UI scheduling code inspect whether UI repaint
- * requests are overflowing or building up. It copies the counters instead of
+ * This accessor lets later UI scheduling code inspect whether repaint requests
+ * are overflowing or building up. It copies the counters instead of
  * exposing the internal dirty list, keeping the drawing contract unchanged.
  *
  * Parameters:

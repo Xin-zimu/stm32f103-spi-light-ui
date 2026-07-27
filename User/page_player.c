@@ -2,7 +2,8 @@
 #include "ui_draw.h"
 
 #define TEXT_PLAYER_TITLE       "\xB2\xA5\xB7\xC5"
-#define TEXT_GIF_DISABLED      "GIF \xBD\xFB\xD3\xC3\xD6\xD0"
+#define TEXT_NO_GIF            "NO GIF"
+#define TEXT_PROGRAM_ANIM      "PROC ANIM"
 #define TEXT_STATE             "\xD7\xB4\xCC\xAC"
 #define TEXT_PLAYING           "\xB2\xA5\xB7\xC5"
 #define TEXT_PAUSED            "\xD4\xDD\xCD\xA3"
@@ -37,7 +38,7 @@ static void Page_Player_InvalidateState(void)
 }
 
 /*
- * Enter the player placeholder page.
+ * Enter the lightweight program-animation placeholder page.
  *
  * Parameters:
  * None.
@@ -46,7 +47,7 @@ static void Page_Player_InvalidateState(void)
  * None.
  *
  * Side effects:
- * Resets the simulated player state.
+ * Resets the simulated animation state.
  */
 static void Page_Player_OnEnter(void)
 {
@@ -55,7 +56,7 @@ static void Page_Player_OnEnter(void)
 }
 
 /*
- * Handle player placeholder events.
+ * Handle lightweight player placeholder events.
  *
  * Parameters:
  * event: UI event after global routing.
@@ -64,7 +65,7 @@ static void Page_Player_OnEnter(void)
  * None.
  *
  * Side effects:
- * Updates simulated playback state and requests local repaint.
+ * Updates the program-animation placeholder state and requests local repaint.
  */
 static void Page_Player_OnEvent(const UI_Event *event)
 {
@@ -93,7 +94,7 @@ static void Page_Player_OnEvent(const UI_Event *event)
 }
 
 /*
- * Draw the player placeholder page within the requested clip.
+ * Draw the program-animation placeholder page within the requested clip.
  *
  * Parameters:
  * clip: Dirty rectangle currently being repainted.
@@ -124,7 +125,8 @@ static void Page_Player_Draw(const UI_Rect *clip)
     UI_DrawStatusBar(TEXT_PLAYER_TITLE, UI_COLOR_ACCENT);
     UI_DrawRect(18, 44, 204, 104, UI_COLOR_SURFACE);
     UI_DrawFrame(34, 60, 172, 56, UI_COLOR_MUTED);
-    UI_DrawTextCN(48, 80, TEXT_GIF_DISABLED, UI_COLOR_WARN);
+    UI_DrawTextCN(76, 74, TEXT_NO_GIF, UI_COLOR_WARN);
+    UI_DrawTextCN(62, 98, TEXT_PROGRAM_ANIM, UI_COLOR_TEXT);
     UI_DrawTextCN(30, 164, TEXT_STATE, UI_COLOR_MUTED);
     UI_DrawTextCN(94, 164, state_text, UI_COLOR_TEXT);
     UI_DrawProgressBar(30, 190, 180, g_player_progress, 100U);

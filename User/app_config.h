@@ -35,8 +35,6 @@
 #define APP_UI_FOCUS_ANIMATION_STEP_MS    16U     // Minimum focus marker repaint interval.
 #define APP_UI_FEEDBACK_MS                60U     // Pressed feedback duration.
 
-#define APP_GIF_MAX_CATCHUP_FRAMES         4U     // Maximum GIF catch-up frames.
-
 #define APP_UI_ENABLE_PERFORMANCE_STATS    1U     // Keep lightweight counters available.
 #define APP_UI_ENABLE_PAGE_TRANSITION      0U     // Sliding transitions remain disabled.
 #define APP_UI_ENABLE_BACKLIGHT_PWM        0U     // PB12 backlight is GPIO-only for now.

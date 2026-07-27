@@ -15,14 +15,14 @@
 - 已实现 16x16 中文子集字库和放大 ASCII 字体。
 - 已实现 HOME / SETTINGS 焦点条动画。
 - 已修复焦点条抽动、快速移动黄色残留和蓝条断裂问题。
-- 已提供 renderer / dirty 轻量统计接口，便于后续 GIF 与 UI 共用 SPI/DMA 时观察积压。
-- GIF 播放源码和历史文档保留，但 GIF 数据和播放模块当前不参与 Keil 构建。
+- 已提供 renderer / dirty 轻量统计接口，便于观察 UI 刷新积压。
+- 当前 STM32F103C8 Flash/RAM 不适合内置真实 GIF；GIF 播放源码和历史文档只作为资料保留，不再作为当前主线计划。
 
 当前最新验证构建结果：
 
 ```text
 0 Error(s), 0 Warning(s)
-Code=11288
+Code=11308
 RO-data=1984
 RW-data=40
 ZI-data=6376
@@ -124,11 +124,11 @@ UP/DOWN 移动焦点，MID/RIGHT 进入。
 
 ### PLAYER
 
-当前是播放器占位页：
+当前是轻量程序动画占位页：
 
-- 显示 GIF 禁用中。
+- 明确显示不内置 GIF。
 - 保留播放/暂停/停止状态机。
-- 后续恢复 GIF 时应只作为 PLAYER 页内部组件接入。
+- 后续只接入由程序生成的小型动画、进度条、波形或状态演示。
 
 ### SETTINGS
 
@@ -142,7 +142,7 @@ LEFT 返回，RIGHT/MID 修改当前项。
 
 ### INFO
 
-显示 MCU、LCD、按键、GIF 状态和当前构建状态。
+显示 MCU、LCD、按键、媒体策略和当前构建状态。
 
 ## 关键实现
 
@@ -196,7 +196,7 @@ SPI2 TX DMA
 
 ### 调试统计
 
-当前提供两组轻量统计，主要给调试器和后续 GIF 调度模块读取：
+当前提供两组轻量统计，主要给调试器和后续 UI 动画调度读取：
 
 - `UI_DirtyGetStats()`：dirty 溢出次数、全屏升级次数、最大 pending 数、当前 pending 数。
 - `UI_RendererGetStats()`：renderer 调用次数、忙返回次数、DMA 忙次数、无空 buffer 次数、条带绘制和提交次数。
@@ -223,7 +223,7 @@ Libraries/
     STM32F10x 标准外设库
 
 Tools/
-    GIF 转换等辅助脚本
+    历史 GIF 转换等辅助脚本
 
 docs/
     学习文档、历史排障文档、变更日志
@@ -284,21 +284,24 @@ int main(void)
 | RST 长按约 600 ms | 回主页 |
 | RST 持续约 2 秒 | 软件复位 |
 
-## 后续计划
+## 媒体边界
 
-下一阶段进入 GIF 与 UI 共享刷新调度：
-
-1. 让 GIF 帧不要绕过 `ui_renderer` / LCD DMA 调度直接抢屏。
-2. 建立统一 LCD 提交通道，UI 条带和 GIF 刷新都从同一个调度点提交。
-3. 定义优先级：按键反馈、焦点移动、页面切换优先；GIF 可以丢帧，UI 不能残留。
-4. 恢复 PLAYER 页 GIF 组件，并只在 PLAYER 页面运行 GIF task。
-5. 用 renderer / dirty 统计判断是否出现 DMA 忙、dirty 溢出或 UI 积压。
-
-恢复 GIF 时的原则：
+当前主线不再尝试把真实 GIF 帧数据内置进 STM32F103C8 固件。原因很直接：
 
 ```text
-GIF 只属于 PLAYER 页面
-离开 PLAYER 停止 GIF task
-进入 PLAYER 重置 GIF 状态
-HOME / SETTINGS / INFO 不依赖 GIF
+Flash 空间紧张
+RAM 无法承受整帧缓存
+真实 GIF 帧会挤压 UI、字库和后续功能空间
 ```
+
+如果以后必须播放真实图片动画，应换成外部 SPI Flash、SD 卡或更大 Flash/RAM 的 MCU。当前板子上只做程序生成动画。
+
+## 后续计划
+
+下一阶段进入轻量 UI 组件和小型程序动画：
+
+1. PLAYER 页增加程序生成动画，例如扫描条、波形、帧计数或小型 sprite。
+2. SETTINGS 亮度进度条只刷新进度条区域。
+3. HOME / PLAYER / SETTINGS 统一 pressed 反馈。
+4. 用 renderer / dirty 统计判断是否出现 DMA 忙、dirty 溢出或 UI 积压。
+5. 保持历史 GIF 工具和文档在 `Tools/`、`docs/` 中，但不纳入当前 Keil 主线。

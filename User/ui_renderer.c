@@ -383,7 +383,7 @@ void UI_RendererRequestFull(void)
  * Read renderer service statistics.
  *
  * The counters are intended for debugger inspection and for the upcoming
- * shared UI/GIF scheduler. They show whether drawing is blocked by DMA, strip
+ * renderer scheduler. They show whether drawing is blocked by DMA, strip
  * buffers, or submit timing without changing normal rendering behavior.
  *
  * Parameters:

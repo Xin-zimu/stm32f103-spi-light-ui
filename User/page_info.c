@@ -5,9 +5,9 @@
 #define TEXT_MCU              "MCU"
 #define TEXT_LCD              "LCD"
 #define TEXT_KEY              "KEY"
-#define TEXT_GIF              "\xB6\xAF\xBB\xAD"
+#define TEXT_MEDIA            "MEDIA"
 #define TEXT_BUILD            "\xD7\xB4\xCC\xAC"
-#define TEXT_DISABLED         "\xBD\xFB\xD3\xC3\xD6\xD0"
+#define TEXT_NO_GIF           "NO GIF"
 #define TEXT_UI_FIRST         "UI FIRST"
 #define TEXT_FOOTER_INFO      "\xD7\xF3\xBC\xFC\xB7\xB5\xBB\xD8  SET\xC9\xE8\xD6\xC3"
 
@@ -86,7 +86,7 @@ static void Page_Info_Draw(const UI_Rect *clip)
     Page_Info_DrawRow(42, TEXT_MCU, "STM32F103C8");
     Page_Info_DrawRow(76, TEXT_LCD, "ST7789");
     Page_Info_DrawRow(110, TEXT_KEY, "PA0-PA6");
-    Page_Info_DrawRow(144, TEXT_GIF, TEXT_DISABLED);
+    Page_Info_DrawRow(144, TEXT_MEDIA, TEXT_NO_GIF);
     Page_Info_DrawRow(178, TEXT_BUILD, TEXT_UI_FIRST);
     UI_DrawFooter(TEXT_FOOTER_INFO);
 }
