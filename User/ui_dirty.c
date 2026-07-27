@@ -353,8 +353,9 @@ void UI_DirtyFullScreen(void)
  * Pop one pending dirty rectangle.
  *
  * A queued full-screen repaint is emitted as one 240x240 rectangle. Local
- * rectangles are popped from the end of the array so removal stays constant
- * time inside the cooperative UI task.
+ * rectangles are popped in insertion order so old row cleanup cannot be
+ * starved by a burst of newer focus animation rectangles. The list is tiny,
+ * so shifting entries is cheaper than showing stale pixels.
  *
  * Parameters:
  * rect: Receives the next dirty rectangle.
@@ -368,6 +369,8 @@ void UI_DirtyFullScreen(void)
  */
 uint8_t UI_DirtyPop(UI_Rect *rect)
 {
+    uint8_t index;
+
     if (rect == 0)
     {
         return 0U;
@@ -388,8 +391,12 @@ uint8_t UI_DirtyPop(UI_Rect *rect)
         return 0U;
     }
 
+    *rect = g_ui_dirty.rects[0];
+    for (index = 1U; index < g_ui_dirty.count; index++)
+    {
+        g_ui_dirty.rects[index - 1U] = g_ui_dirty.rects[index];
+    }
     g_ui_dirty.count--;
-    *rect = g_ui_dirty.rects[g_ui_dirty.count];
 
     return 1U;
 }

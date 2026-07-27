@@ -238,8 +238,13 @@ void UI_PageDispatchEvent(const UI_Event *event)
 /*
  * Run page redraw work.
  *
+ * Rendering runs before page-local animation updates. While the strip renderer
+ * is still draining a dirty area, focus animation is held at its current
+ * position so separate horizontal strips are not drawn from different animation
+ * frames.
+ *
  * Parameters:
- * now: Current Timing_GetTick timestamp reserved for later animations.
+ * now: Current Timing_GetTick timestamp.
  *
  * Return value:
  * None.
@@ -249,11 +254,18 @@ void UI_PageDispatchEvent(const UI_Event *event)
  */
 void UI_PageTask(uint32_t now)
 {
+    const UI_PageOps *page;
+
+    page = UI_PAGES[g_ui_current_page];
     UI_FeedbackTask(now);
-    if (UI_PAGES[g_ui_current_page]->task != 0)
+    UI_RendererTask(now, page);
+    if (UI_RendererIsBusy() != 0U)
     {
-        UI_PAGES[g_ui_current_page]->task(now);
+        return;
     }
 
-    UI_RendererTask(now, UI_PAGES[g_ui_current_page]);
+    if (page->task != 0)
+    {
+        page->task(now);
+    }
 }
