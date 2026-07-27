@@ -11,19 +11,21 @@
 - 已接入 5D 摇杆按键输入。
 - 已完成 HOME / PLAYER / SETTINGS / INFO 页面框架。
 - 已实现脏矩形局部刷新。
+- 已实现 UI renderer 条带双缓冲，页面绘制先写入 240x4 RGB565 条带 buffer，再经 LCD DMA 送屏。
 - 已实现 16x16 中文子集字库和放大 ASCII 字体。
 - 已实现 HOME / SETTINGS 焦点条动画。
-- 已修复焦点条抽动问题。
+- 已修复焦点条抽动、快速移动黄色残留和蓝条断裂问题。
+- 已提供 renderer / dirty 轻量统计接口，便于后续 GIF 与 UI 共用 SPI/DMA 时观察积压。
 - GIF 播放源码和历史文档保留，但 GIF 数据和播放模块当前不参与 Keil 构建。
 
 当前最新验证构建结果：
 
 ```text
 0 Error(s), 0 Warning(s)
-Code=12152
+Code=11288
 RO-data=1984
-RW-data=16
-ZI-data=2424
+RW-data=40
+ZI-data=6376
 ```
 
 ## 硬件
@@ -99,7 +101,10 @@ ui_draw / ui_font
     中文子集、大号 ASCII、菜单行、状态栏、页脚、控件绘制
         ↓
 ui_dirty
-    脏矩形队列、裁剪、合并、动画窄脏区
+    脏矩形队列、裁剪、合并、FIFO 消费、积压统计
+        ↓
+ui_renderer
+    240x4 条带双缓冲、页面 buffer 绘制、LCD DMA 提交、忙状态统计
         ↓
 bsp_st7789
     ST7789 SPI/DMA 底层驱动
@@ -167,16 +172,40 @@ STM32F103C8T6 RAM 只有约 20 KB，因此不能保存整屏图像。当前策�
 哪里变化，就刷新哪里
 ```
 
-### 脏矩形刷新
+### 条带双缓冲刷新
 
-普通 UI 变化使用 `UI_DirtyAdd()`，会裁剪并合并相近区域。动画焦点条使用 `UI_DirtyAddIsolated()`，避免窄条脏区被合并成整行刷新。
-
-焦点条抽动修复后的核心原则：
+普通 UI 变化使用 `UI_DirtyAdd()`，会裁剪并合并相近区域。`ui_renderer` 从 dirty 队列取出刷新范围后，按 4 像素高切成全宽条带：
 
 ```text
-视觉上只有 5px 焦点条在动
-实际刷新也必须只有 5px 焦点条区域
+dirty Y 范围
+    ↓
+240 x 4 RGB565 strip buffer
+    ↓
+ST7789 address window
+    ↓
+SPI2 TX DMA
 ```
+
+当前没有使用 240x240 全帧缓冲，只保留两个 240x4 条带 buffer：
+
+```text
+240 x 4 x 2 x 2 = 3840 字节
+```
+
+焦点动画在 renderer 忙时会暂停推进，避免同一个 dirty 的不同条带使用不同焦点位置绘制。dirty 队列按 FIFO 消费，避免旧行清理被快速按键产生的新 dirty 长时间压住。
+
+### 调试统计
+
+当前提供两组轻量统计，主要给调试器和后续 GIF 调度模块读取：
+
+- `UI_DirtyGetStats()`：dirty 溢出次数、全屏升级次数、最大 pending 数、当前 pending 数。
+- `UI_RendererGetStats()`：renderer 调用次数、忙返回次数、DMA 忙次数、无空 buffer 次数、条带绘制和提交次数。
+
+这些接口不改变屏幕显示行为，也不依赖串口输出。
+
+### 阶段 C/D 验收状态
+
+已完成条带双缓冲和 `ui_draw` buffer 绘制改造。上板快速上下移动验证后，黄色历史残留和蓝条断裂已修复。当前限制是：renderer 仍按 dirty 的 Y 范围发送全宽条带，尚未实现真正按 `x/w` 的窄区域条带发送。
 
 ## 目录说明
 
@@ -257,13 +286,13 @@ int main(void)
 
 ## 后续计划
 
-建议下一步优先继续打磨 UI，而不是立刻恢复 GIF：
+下一阶段进入 GIF 与 UI 共享刷新调度：
 
-1. SETTINGS 亮度进度条只刷新进度条区域。
-2. HOME 进入页面增加短 pressed 反馈。
-3. 页脚文案进一步压缩，避免中文拥挤。
-4. PLAYER 页作为独立组件恢复 GIF 播放。
-5. 评估 GIF 数据重新加入后的 Flash 余量。
+1. 让 GIF 帧不要绕过 `ui_renderer` / LCD DMA 调度直接抢屏。
+2. 建立统一 LCD 提交通道，UI 条带和 GIF 刷新都从同一个调度点提交。
+3. 定义优先级：按键反馈、焦点移动、页面切换优先；GIF 可以丢帧，UI 不能残留。
+4. 恢复 PLAYER 页 GIF 组件，并只在 PLAYER 页面运行 GIF task。
+5. 用 renderer / dirty 统计判断是否出现 DMA 忙、dirty 溢出或 UI 积压。
 
 恢复 GIF 时的原则：
 

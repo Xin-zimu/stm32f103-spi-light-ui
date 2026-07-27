@@ -47,6 +47,7 @@ typedef struct
 static uint8_t g_ui_strip_storage[APP_UI_STRIP_BUFFER_COUNT][UI_RENDER_STRIP_BYTES];
 static UI_StripBuffer g_ui_strip_buffers[APP_UI_STRIP_BUFFER_COUNT];
 static UI_RenderContext g_ui_renderer;
+static UI_RendererStats g_ui_renderer_stats;
 
 /*
  * Return the index of a free strip buffer.
@@ -154,6 +155,7 @@ static void UI_RendererDrawStrip(const UI_PageOps *page)
     UI_DrawEndBuffer();
 
     buffer->state = UI_BUFFER_READY;
+    g_ui_renderer_stats.strips_drawn++;
 }
 
 /*
@@ -204,6 +206,7 @@ static uint8_t UI_RendererSubmitStrip(void)
     }
 
     buffer->state = UI_BUFFER_SENDING;
+    g_ui_renderer_stats.strips_submitted++;
     return 1U;
 }
 
@@ -237,6 +240,7 @@ void UI_RendererInit(void)
     g_ui_renderer.state = UI_RENDER_IDLE;
     g_ui_renderer.next_y = 0;
     g_ui_renderer.buffer_index = 0U;
+    UI_RendererResetStats();
 }
 
 /*
@@ -263,6 +267,7 @@ void UI_RendererTask(uint32_t now, const UI_PageOps *page)
 
     (void)now;
 
+    g_ui_renderer_stats.task_calls++;
     LCD_DMA_Task();
     steps = UI_RENDER_TASK_STEP_LIMIT;
     while (steps > 0U)
@@ -275,6 +280,7 @@ void UI_RendererTask(uint32_t now, const UI_PageOps *page)
                 {
                     return;
                 }
+                g_ui_renderer_stats.dirty_rects_started++;
                 g_ui_renderer.next_y = g_ui_renderer.dirty.y;
                 g_ui_renderer.state = UI_RENDER_PREPARE_STRIP;
                 break;
@@ -291,6 +297,8 @@ void UI_RendererTask(uint32_t now, const UI_PageOps *page)
             case UI_RENDER_DRAW_STRIP:
                 if (UI_RendererFindFreeBuffer(&g_ui_renderer.buffer_index) == 0U)
                 {
+                    g_ui_renderer_stats.no_buffer_returns++;
+                    g_ui_renderer_stats.busy_returns++;
                     return;
                 }
                 UI_RendererDrawStrip(page);
@@ -300,6 +308,8 @@ void UI_RendererTask(uint32_t now, const UI_PageOps *page)
             case UI_RENDER_SUBMIT_DMA:
                 if (UI_RendererSubmitStrip() == 0U)
                 {
+                    g_ui_renderer_stats.submit_busy_returns++;
+                    g_ui_renderer_stats.busy_returns++;
                     return;
                 }
                 g_ui_renderer.state = UI_RENDER_WAIT_DMA;
@@ -308,6 +318,8 @@ void UI_RendererTask(uint32_t now, const UI_PageOps *page)
             case UI_RENDER_WAIT_DMA:
                 if (LCD_DMA_IsBusy() != 0U)
                 {
+                    g_ui_renderer_stats.dma_busy_returns++;
+                    g_ui_renderer_stats.busy_returns++;
                     return;
                 }
                 ST7789_WaitWriteComplete();
@@ -365,4 +377,58 @@ uint8_t UI_RendererIsBusy(void)
 void UI_RendererRequestFull(void)
 {
     UI_DirtyFullScreen();
+}
+
+/*
+ * Read renderer service statistics.
+ *
+ * The counters are intended for debugger inspection and for the upcoming
+ * shared UI/GIF scheduler. They show whether drawing is blocked by DMA, strip
+ * buffers, or submit timing without changing normal rendering behavior.
+ *
+ * Parameters:
+ * stats: Destination structure that receives a snapshot of the counters.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Writes stats when the pointer is valid.
+ */
+void UI_RendererGetStats(UI_RendererStats *stats)
+{
+    if (stats == 0)
+    {
+        return;
+    }
+
+    *stats = g_ui_renderer_stats;
+}
+
+/*
+ * Reset renderer service statistics.
+ *
+ * Runtime diagnostics can call this at the beginning of a manual stress test
+ * so the counters describe only that test interval. Renderer state, dirty
+ * queue contents, and in-flight DMA transfers are not changed.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Clears accumulated renderer statistics.
+ */
+void UI_RendererResetStats(void)
+{
+    g_ui_renderer_stats.task_calls = 0U;
+    g_ui_renderer_stats.busy_returns = 0U;
+    g_ui_renderer_stats.dma_busy_returns = 0U;
+    g_ui_renderer_stats.no_buffer_returns = 0U;
+    g_ui_renderer_stats.submit_busy_returns = 0U;
+    g_ui_renderer_stats.dirty_rects_started = 0U;
+    g_ui_renderer_stats.strips_drawn = 0U;
+    g_ui_renderer_stats.strips_submitted = 0U;
 }

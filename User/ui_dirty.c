@@ -10,6 +10,31 @@ typedef struct
 } UI_DirtyList;
 
 static UI_DirtyList g_ui_dirty;
+static UI_DirtyStats g_ui_dirty_stats;
+
+/*
+ * Update the maximum observed pending dirty count.
+ *
+ * The value is used as a lightweight load indicator while tuning UI and GIF
+ * refresh scheduling. It only tracks local dirty rectangles because a pending
+ * full-screen refresh clears the local list by design.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * May update g_ui_dirty_stats.max_pending_rects.
+ */
+static void UI_DirtyUpdateMaxPending(void)
+{
+    if (g_ui_dirty.count > g_ui_dirty_stats.max_pending_rects)
+    {
+        g_ui_dirty_stats.max_pending_rects = g_ui_dirty.count;
+    }
+}
 
 /*
  * Clip a rectangle to the visible ST7789 area.
@@ -171,6 +196,7 @@ void UI_DirtyInit(void)
 {
     g_ui_dirty.count = 0U;
     g_ui_dirty.full_screen = 0U;
+    UI_DirtyResetStats();
 }
 
 /*
@@ -214,27 +240,30 @@ void UI_DirtyAdd(const UI_Rect *rect)
         if (UI_DirtyShouldMerge(&g_ui_dirty.rects[index], &clipped) != 0U)
         {
             UI_DirtyUnionInto(&g_ui_dirty.rects[index], &clipped);
+            UI_DirtyUpdateMaxPending();
             return;
         }
     }
 
     if (g_ui_dirty.count >= UI_DIRTY_MAX_RECTS)
     {
+        g_ui_dirty_stats.overflow_count++;
         UI_DirtyFullScreen();
         return;
     }
 
     g_ui_dirty.rects[g_ui_dirty.count] = clipped;
     g_ui_dirty.count++;
+    UI_DirtyUpdateMaxPending();
 }
 
 /*
  * Add a dirty rectangle without merging it with existing areas.
  *
- * Focus-marker animation must stay as a narrow repaint. If the marker area is
- * merged into a pending row repaint, one animation frame can become a wide
- * text redraw and appear to stutter. This entry point still clips and promotes
- * overflow to full-screen, but deliberately skips the merge scan.
+ * Some future callers may need to keep a repaint request separate from nearby
+ * areas. The current strip renderer usually prefers merged row-level focus
+ * repaint, but this entry point remains available for deliberately isolated
+ * work. It still clips and promotes overflow to full-screen.
  *
  * Parameters:
  * rect: Rectangle that must be redrawn independently.
@@ -266,12 +295,14 @@ void UI_DirtyAddIsolated(const UI_Rect *rect)
 
     if (g_ui_dirty.count >= UI_DIRTY_MAX_RECTS)
     {
+        g_ui_dirty_stats.overflow_count++;
         UI_DirtyFullScreen();
         return;
     }
 
     g_ui_dirty.rects[g_ui_dirty.count] = clipped;
     g_ui_dirty.count++;
+    UI_DirtyUpdateMaxPending();
 }
 
 /*
@@ -347,6 +378,7 @@ void UI_DirtyFullScreen(void)
 {
     g_ui_dirty.count = 0U;
     g_ui_dirty.full_screen = 1U;
+    g_ui_dirty_stats.full_screen_count++;
 }
 
 /*
@@ -417,4 +449,57 @@ void UI_DirtyClear(void)
 {
     g_ui_dirty.count = 0U;
     g_ui_dirty.full_screen = 0U;
+}
+
+/*
+ * Read current dirty queue statistics.
+ *
+ * This accessor lets later GIF/UI scheduling code inspect whether UI repaint
+ * requests are overflowing or building up. It copies the counters instead of
+ * exposing the internal dirty list, keeping the drawing contract unchanged.
+ *
+ * Parameters:
+ * stats: Destination structure that receives the latest counters.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Writes stats when the pointer is valid.
+ */
+void UI_DirtyGetStats(UI_DirtyStats *stats)
+{
+    if (stats == 0)
+    {
+        return;
+    }
+
+    *stats = g_ui_dirty_stats;
+    stats->pending_rects = g_ui_dirty.count;
+    stats->full_screen_pending = g_ui_dirty.full_screen;
+}
+
+/*
+ * Reset dirty queue statistics without changing pending repaint work.
+ *
+ * Runtime diagnostics can call this after a manual test starts so max pending
+ * and overflow counters describe only that test interval. The pending repaint
+ * list itself is not touched.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Clears accumulated dirty statistics.
+ */
+void UI_DirtyResetStats(void)
+{
+    g_ui_dirty_stats.overflow_count = 0U;
+    g_ui_dirty_stats.full_screen_count = 0U;
+    g_ui_dirty_stats.max_pending_rects = g_ui_dirty.count;
+    g_ui_dirty_stats.pending_rects = g_ui_dirty.count;
+    g_ui_dirty_stats.full_screen_pending = g_ui_dirty.full_screen;
 }
