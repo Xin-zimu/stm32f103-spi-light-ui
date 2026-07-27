@@ -14,6 +14,7 @@
 - 已实现 UI renderer 条带双缓冲，页面绘制先写入 240x4 RGB565 条带 buffer，再经 LCD DMA 送屏。
 - 已实现 16x16 中文子集字库和放大 ASCII 字体。
 - 已实现 HOME / SETTINGS 焦点条动画。
+- 已实现 PLAYER 程序生成动画，用扫描条、移动块和波形验证持续局部刷新。
 - 已修复焦点条抽动、快速移动黄色残留和蓝条断裂问题。
 - 已提供 renderer / dirty 轻量统计接口，便于观察 UI 刷新积压。
 - 当前 STM32F103C8 Flash/RAM 不适合内置真实 GIF；GIF 播放源码和历史文档只作为资料保留，不再作为当前主线计划。
@@ -22,10 +23,10 @@
 
 ```text
 0 Error(s), 0 Warning(s)
-Code=11308
-RO-data=1984
+Code=11740
+RO-data=1988
 RW-data=40
-ZI-data=6376
+ZI-data=6384
 ```
 
 ## 硬件
@@ -124,11 +125,14 @@ UP/DOWN 移动焦点，MID/RIGHT 进入。
 
 ### PLAYER
 
-当前是轻量程序动画占位页：
+当前是轻量程序动画验证页：
 
 - 明确显示不内置 GIF。
-- 保留播放/暂停/停止状态机。
-- 后续只接入由程序生成的小型动画、进度条、波形或状态演示。
+- 使用扫描条、移动块和波形条生成动画，不存图片帧。
+- RIGHT 从头播放。
+- MID/OK 播放/暂停切换。
+- LEFT 返回。
+- 每帧只刷新动画画布区域。
 
 ### SETTINGS
 
@@ -298,10 +302,10 @@ RAM 无法承受整帧缓存
 
 ## 后续计划
 
-下一阶段进入轻量 UI 组件和小型程序动画：
+下一阶段继续完善轻量 UI 组件：
 
-1. PLAYER 页增加程序生成动画，例如扫描条、波形、帧计数或小型 sprite。
-2. SETTINGS 亮度进度条只刷新进度条区域。
-3. HOME / PLAYER / SETTINGS 统一 pressed 反馈。
+1. SETTINGS 亮度进度条只刷新进度条区域。
+2. HOME / PLAYER / SETTINGS 统一 pressed 反馈。
+3. PLAYER 动画增加帧计数或更多程序生成图形。
 4. 用 renderer / dirty 统计判断是否出现 DMA 忙、dirty 溢出或 UI 积压。
 5. 保持历史 GIF 工具和文档在 `Tools/`、`docs/` 中，但不纳入当前 Keil 主线。

@@ -10,15 +10,75 @@
 #define TEXT_STOPPED           "\xCD\xA3\xD6\xB9"
 #define TEXT_FOOTER_PLAYER     "\xC8\xB7\xC8\xCF\xB2\xA5\xB7\xC5  \xD7\xF3\xBC\xFC\xB7\xB5\xBB\xD8"
 
+#define PLAYER_ANIM_X          24       // Animation canvas left coordinate.
+#define PLAYER_ANIM_Y          50       // Animation canvas top coordinate.
+#define PLAYER_ANIM_W          192      // Animation canvas width.
+#define PLAYER_ANIM_H          92       // Animation canvas height.
+#define PLAYER_ANIM_STEP_MS    33U      // Program animation frame interval.
+#define PLAYER_SCAN_W          30       // Moving scan band width.
+#define PLAYER_SPRITE_SIZE     12       // Moving block size.
+#define PLAYER_WAVE_COUNT      8U       // Number of generated waveform bars.
+
 typedef enum
 {
-    PLAYER_STATE_STOPPED = 0,             // Placeholder is stopped.
-    PLAYER_STATE_PLAYING,                 // Simulated playback is running.
-    PLAYER_STATE_PAUSED                   // Simulated playback is paused.
+    PLAYER_STATE_STOPPED = 0,             // Program animation is stopped.
+    PLAYER_STATE_PLAYING,                 // Program animation is running.
+    PLAYER_STATE_PAUSED                   // Program animation is paused.
 } PlayerState;
 
 static PlayerState g_player_state = PLAYER_STATE_STOPPED;
 static uint8_t g_player_progress = 0U;
+static uint16_t g_player_frame = 0U;
+static uint32_t g_player_last_step_ms = 0U;
+
+/*
+ * Build the fixed program-animation canvas rectangle.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * Rectangle covering only the PLAYER animation canvas.
+ *
+ * Side effects:
+ * None.
+ */
+static UI_Rect Page_Player_GetAnimRect(void)
+{
+    UI_Rect rect;
+
+    rect.x = PLAYER_ANIM_X;
+    rect.y = PLAYER_ANIM_Y;
+    rect.w = PLAYER_ANIM_W;
+    rect.h = PLAYER_ANIM_H;
+
+    return rect;
+}
+
+/*
+ * Mark the animation canvas dirty.
+ *
+ * The generated animation is fully contained in one fixed canvas. Repainting
+ * only this rectangle keeps the PLAYER page useful as a strip-renderer stress
+ * test without forcing the status bar, footer, or state row to refresh every
+ * frame.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Queues a local repaint for the animation canvas.
+ */
+static void Page_Player_InvalidateAnim(void)
+{
+    UI_Rect rect;
+
+    rect = Page_Player_GetAnimRect();
+    UI_PageInvalidate(&rect);
+}
 
 /*
  * Mark the dynamic player state area dirty.
@@ -53,6 +113,8 @@ static void Page_Player_OnEnter(void)
 {
     g_player_state = PLAYER_STATE_STOPPED;
     g_player_progress = 0U;
+    g_player_frame = 0U;
+    g_player_last_step_ms = 0U;
 }
 
 /*
@@ -78,18 +140,126 @@ static void Page_Player_OnEvent(const UI_Event *event)
         if (g_player_state == PLAYER_STATE_PLAYING)
         {
             g_player_state = PLAYER_STATE_PAUSED;
+            g_player_progress = 50U;
         }
         else
         {
             g_player_state = PLAYER_STATE_PLAYING;
+            g_player_progress = 100U;
+            g_player_last_step_ms = event->timestamp;
         }
         Page_Player_InvalidateState();
+        Page_Player_InvalidateAnim();
     }
     else if (event->type == UI_EVENT_RIGHT)
     {
         g_player_state = PLAYER_STATE_PLAYING;
-        g_player_progress = 0U;
+        g_player_progress = 100U;
+        g_player_frame = 0U;
+        g_player_last_step_ms = event->timestamp;
         Page_Player_InvalidateState();
+        Page_Player_InvalidateAnim();
+    }
+}
+
+/*
+ * Advance the generated PLAYER animation.
+ *
+ * The page manager calls page tasks only after the strip renderer becomes
+ * idle, so dropping intermediate time slices is intentional. The animation is
+ * generated from counters and rectangles, not stored frames, so skipped frames
+ * do not accumulate memory or dirty queue work.
+ *
+ * Parameters:
+ * now: Current scheduler tick.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Updates the frame counter and queues the animation canvas for repaint.
+ */
+static void Page_Player_Task(uint32_t now)
+{
+    if (g_player_state != PLAYER_STATE_PLAYING)
+    {
+        return;
+    }
+
+    if ((now - g_player_last_step_ms) < PLAYER_ANIM_STEP_MS)
+    {
+        return;
+    }
+
+    g_player_last_step_ms = now;
+    g_player_frame++;
+    Page_Player_InvalidateAnim();
+}
+
+/*
+ * Draw the generated animation canvas.
+ *
+ * PLAYING uses a moving scan band, a small block, and generated waveform bars
+ * to exercise continuous local refresh. STOPPED and PAUSED keep the canvas
+ * deterministic and static, proving the state machine can hold a frame without
+ * background redraw work.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Draws the PLAYER animation canvas through clipped primitives.
+ */
+static void Page_Player_DrawAnim(void)
+{
+    UI_Rect rect;
+    uint8_t index;
+    uint8_t phase;
+    int16_t scan_span;
+    int16_t scan_x;
+    int16_t sprite_span;
+    int16_t sprite_x;
+    int16_t sprite_y;
+    int16_t bar_x;
+    int16_t bar_h;
+    int16_t base_y;
+
+    rect = Page_Player_GetAnimRect();
+    UI_DrawRect(rect.x, rect.y, rect.w, rect.h, UI_COLOR_SURFACE);
+    UI_DrawFrame(rect.x, rect.y, rect.w, rect.h, UI_COLOR_MUTED);
+
+    if (g_player_state == PLAYER_STATE_STOPPED)
+    {
+        UI_DrawTextCN(76, 72, TEXT_NO_GIF, UI_COLOR_WARN);
+        UI_DrawTextCN(62, 98, TEXT_PROGRAM_ANIM, UI_COLOR_TEXT);
+        return;
+    }
+
+    if (g_player_state == PLAYER_STATE_PAUSED)
+    {
+        UI_DrawTextCN(76, 84, TEXT_PAUSED, UI_COLOR_WARN);
+        return;
+    }
+
+    scan_span = (int16_t)(rect.w - PLAYER_SCAN_W - 2);
+    scan_x = (int16_t)(rect.x + 1 + (int16_t)(((uint32_t)g_player_frame * 4U) % (uint16_t)scan_span));
+    UI_DrawRect(scan_x, (int16_t)(rect.y + 2), PLAYER_SCAN_W, (int16_t)(rect.h - 4), UI_COLOR_SURFACE_2);
+
+    sprite_span = (int16_t)(rect.w - PLAYER_SPRITE_SIZE - 2);
+    sprite_x = (int16_t)(rect.x + 1 + (int16_t)(((uint32_t)g_player_frame * 3U) % (uint16_t)sprite_span));
+    sprite_y = (int16_t)(rect.y + 18 + (int16_t)((g_player_frame / 3U) % 24U));
+    UI_DrawRect(sprite_x, sprite_y, PLAYER_SPRITE_SIZE, PLAYER_SPRITE_SIZE, UI_COLOR_ACCENT);
+
+    base_y = (int16_t)(rect.y + rect.h - 14);
+    for (index = 0U; index < PLAYER_WAVE_COUNT; index++)
+    {
+        phase = (uint8_t)((g_player_frame + (uint16_t)(index * 3U)) % 24U);
+        bar_h = (int16_t)(8U + ((phase < 12U) ? phase : (uint8_t)(24U - phase)));
+        bar_x = (int16_t)(rect.x + 18 + ((int16_t)index * 20));
+        UI_DrawRect(bar_x, (int16_t)(base_y - bar_h), 10, bar_h, UI_COLOR_OK);
     }
 }
 
@@ -115,7 +285,6 @@ static void Page_Player_Draw(const UI_Rect *clip)
     if (g_player_state == PLAYER_STATE_PLAYING)
     {
         state_text = TEXT_PLAYING;
-        g_player_progress = 36U;
     }
     else if (g_player_state == PLAYER_STATE_PAUSED)
     {
@@ -123,10 +292,7 @@ static void Page_Player_Draw(const UI_Rect *clip)
     }
 
     UI_DrawStatusBar(TEXT_PLAYER_TITLE, UI_COLOR_ACCENT);
-    UI_DrawRect(18, 44, 204, 104, UI_COLOR_SURFACE);
-    UI_DrawFrame(34, 60, 172, 56, UI_COLOR_MUTED);
-    UI_DrawTextCN(76, 74, TEXT_NO_GIF, UI_COLOR_WARN);
-    UI_DrawTextCN(62, 98, TEXT_PROGRAM_ANIM, UI_COLOR_TEXT);
+    Page_Player_DrawAnim();
     UI_DrawTextCN(30, 164, TEXT_STATE, UI_COLOR_MUTED);
     UI_DrawTextCN(94, 164, state_text, UI_COLOR_TEXT);
     UI_DrawProgressBar(30, 190, 180, g_player_progress, 100U);
@@ -137,6 +303,6 @@ const UI_PageOps PAGE_PLAYER_OPS =
 {
     Page_Player_OnEnter,
     Page_Player_OnEvent,
-    0,
+    Page_Player_Task,
     Page_Player_Draw
 };
