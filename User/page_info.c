@@ -5,14 +5,14 @@
 
 #define TEXT_INFO_TITLE        "\xCF\xB5\xCD\xB3\xD0\xC5\xCF\xA2"
 #define TEXT_STRIP            "STRIP"
-#define TEXT_BYTES            "BYTES"
+#define TEXT_KB               "KB"
 #define TEXT_BUSY             "BUSY"
 #define TEXT_DMA              "DMA"
 #define TEXT_DIRTY            "DIRTY"
-#define TEXT_FOOTER_INFO      "\xD7\xF3\xBC\xFC\xB7\xB5\xBB\xD8  SET\xC9\xE8\xD6\xC3"
+#define TEXT_FOOTER_INFO      "L BACK OK CLR R REF"
 
 static char g_info_strip_text[8];
-static char g_info_bytes_text[8];
+static char g_info_kb_text[8];
 static char g_info_busy_text[8];
 static char g_info_dma_text[8];
 static char g_info_dirty_text[8];
@@ -71,6 +71,36 @@ static void Page_Info_FormatU32(uint32_t value, char *buffer, uint8_t buffer_siz
         buffer[index] = digits[count - 1U - index];
     }
     buffer[count] = '\0';
+}
+
+/*
+ * Format a byte counter as rounded-up kilobytes.
+ *
+ * The raw byte counter can grow quickly and is hard to read on a 240 pixel
+ * display. Rounding nonzero byte counts up to at least 1 KB keeps the field
+ * compact while still showing whether narrow-strip traffic is increasing.
+ *
+ * Parameters:
+ * bytes: Raw byte counter.
+ * buffer: Destination buffer.
+ * buffer_size: Number of bytes in buffer.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Writes buffer.
+ */
+static void Page_Info_FormatKB(uint32_t bytes, char *buffer, uint8_t buffer_size)
+{
+    uint32_t kb;
+
+    kb = bytes / 1024U;
+    if ((bytes % 1024U) != 0U)
+    {
+        kb++;
+    }
+    Page_Info_FormatU32(kb, buffer, buffer_size);
 }
 
 /*
@@ -133,10 +163,33 @@ static void Page_Info_CaptureStats(void)
     UI_RendererGetStats(&renderer_stats);
     UI_DirtyGetStats(&dirty_stats);
     Page_Info_FormatU32(renderer_stats.strips_submitted, g_info_strip_text, (uint8_t)sizeof(g_info_strip_text));
-    Page_Info_FormatU32(renderer_stats.bytes_submitted, g_info_bytes_text, (uint8_t)sizeof(g_info_bytes_text));
+    Page_Info_FormatKB(renderer_stats.bytes_submitted, g_info_kb_text, (uint8_t)sizeof(g_info_kb_text));
     Page_Info_FormatU32(renderer_stats.busy_returns, g_info_busy_text, (uint8_t)sizeof(g_info_busy_text));
     Page_Info_FormatU32(renderer_stats.dma_busy_returns, g_info_dma_text, (uint8_t)sizeof(g_info_dma_text));
     Page_Info_FormatDirty(&dirty_stats, g_info_dirty_text, (uint8_t)sizeof(g_info_dirty_text));
+}
+
+/*
+ * Reset renderer and dirty counters, then display the zero snapshot.
+ *
+ * The redraw that shows the zero snapshot will itself add later renderer
+ * traffic. That cost is intentionally not folded into the just-cleared display;
+ * pressing RIGHT after the redraw shows the post-reset rendering cost.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Clears renderer and dirty statistics and updates cached INFO text buffers.
+ */
+static void Page_Info_ResetStats(void)
+{
+    UI_RendererResetStats();
+    UI_DirtyResetStats();
+    Page_Info_CaptureStats();
 }
 
 /*
@@ -166,8 +219,8 @@ static void Page_Info_OnEnter(void)
  * None.
  *
  * Side effects:
- * LEFT returns to HOME. OK and RIGHT refresh the displayed diagnostics
- * snapshot and request a redraw.
+ * LEFT returns to HOME. OK clears the displayed diagnostics window, while
+ * RIGHT refreshes the snapshot without clearing counters.
  */
 static void Page_Info_OnEvent(const UI_Event *event)
 {
@@ -177,7 +230,14 @@ static void Page_Info_OnEvent(const UI_Event *event)
         return;
     }
 
-    if ((event->type == UI_EVENT_OK) || (event->type == UI_EVENT_RIGHT))
+    if (event->type == UI_EVENT_OK)
+    {
+        Page_Info_ResetStats();
+        UI_PageRequestRedraw();
+        return;
+    }
+
+    if (event->type == UI_EVENT_RIGHT)
     {
         Page_Info_CaptureStats();
         UI_PageRequestRedraw();
@@ -222,7 +282,7 @@ static void Page_Info_Draw(const UI_Rect *clip)
 
     UI_DrawStatusBar(TEXT_INFO_TITLE, UI_COLOR_OK);
     Page_Info_DrawRow(42, TEXT_STRIP, g_info_strip_text);
-    Page_Info_DrawRow(76, TEXT_BYTES, g_info_bytes_text);
+    Page_Info_DrawRow(76, TEXT_KB, g_info_kb_text);
     Page_Info_DrawRow(110, TEXT_BUSY, g_info_busy_text);
     Page_Info_DrawRow(144, TEXT_DMA, g_info_dma_text);
     Page_Info_DrawRow(178, TEXT_DIRTY, g_info_dirty_text);
