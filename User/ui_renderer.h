@@ -14,6 +14,7 @@ typedef struct
     uint32_t dirty_rects_started;      // Dirty rectangles consumed from the queue.
     uint32_t strips_drawn;             // Strip buffers rendered by CPU.
     uint32_t strips_submitted;         // Strip buffers accepted by LCD DMA.
+    uint32_t bytes_submitted;          // RGB565 bytes accepted by LCD DMA.
 } UI_RendererStats;
 
 void UI_RendererInit(void);

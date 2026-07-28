@@ -145,8 +145,10 @@ static uint8_t UI_DrawClipRect(UI_Rect *rect)
 /*
  * Fill a clipped rectangle inside the active strip buffer.
  *
- * The strip buffer is always APP_LCD_WIDTH pixels wide so offsets stay simple
- * and line strides are stable across full-screen and local dirty redraws.
+ * Renderer strips may cover only the dirty x/w window. Buffer offsets are
+ * therefore relative to g_ui_draw_context.strip instead of absolute screen
+ * coordinates, otherwise a narrow transfer would send the wrong bytes from
+ * the front of the buffer.
  *
  * Parameters:
  * rect: Clipped screen-space rectangle.
@@ -171,7 +173,8 @@ static void UI_DrawRectToBuffer(const UI_Rect *rect, uint16_t color)
     for (row = 0; row < rect->h; row++)
     {
         offset = (uint16_t)((((rect->y - g_ui_draw_context.strip.y) + row) *
-                             (int16_t)UI_SCREEN_W + rect->x) * 2);
+                             g_ui_draw_context.strip.w +
+                             (rect->x - g_ui_draw_context.strip.x)) * 2);
         for (col = 0; col < rect->w; col++)
         {
             g_ui_draw_context.buffer[offset++] = high;

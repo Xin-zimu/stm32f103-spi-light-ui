@@ -11,12 +11,17 @@
 #define PAGE_SETTINGS_BRIGHT_Y   116       // Brightness progress bar top coordinate.
 #define PAGE_SETTINGS_BRIGHT_W    78       // Brightness progress bar width.
 #define PAGE_SETTINGS_BRIGHT_H    10       // Brightness progress bar height.
+#define PAGE_SETTINGS_TOGGLE_X   188       // Animation toggle left coordinate.
+#define PAGE_SETTINGS_TOGGLE_Y    63       // Animation toggle top coordinate.
+#define PAGE_SETTINGS_TOGGLE_W    30       // Animation toggle width.
+#define PAGE_SETTINGS_TOGGLE_H    14       // Animation toggle height.
+#define PAGE_SETTINGS_VALUE_X    156       // Right-side value repaint left coordinate.
+#define PAGE_SETTINGS_VALUE_W     68       // Right-side value repaint width.
+#define PAGE_SETTINGS_VALUE_H     28       // Right-side value repaint height.
 #define TEXT_SETTINGS_TITLE       "\xC9\xE8\xD6\xC3"
 #define TEXT_ANIMATION            "\xB6\xAF\xBB\xAD"
 #define TEXT_BRIGHTNESS           "\xC1\xC1\xB6\xC8"
 #define TEXT_THEME                "\xD6\xF7\xCC\xE2"
-#define TEXT_ON                   "\xBF\xAA"
-#define TEXT_OFF                  "\xB9\xD8"
 #define TEXT_FOOTER_SETTINGS      "\xC8\xB7\xC8\xCF\xBD\xF8\xC8\xEB  \xD7\xF3\xBC\xFC\xB7\xB5\xBB\xD8"
 
 static uint8_t g_settings_selected = 0U;
@@ -25,6 +30,30 @@ static uint8_t g_settings_brightness = 3U;
 static uint8_t g_settings_theme = 0U;
 static UI_FocusAnim g_settings_focus_anim;
 static uint32_t g_settings_draw_now = 0U;
+
+/*
+ * Build the repaint rectangle for the animation toggle.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * Rectangle covering the switch and its short feedback frame.
+ *
+ * Side effects:
+ * None.
+ */
+static UI_Rect Page_Settings_GetAnimationRect(void)
+{
+    UI_Rect rect;
+
+    rect.x = (int16_t)(PAGE_SETTINGS_TOGGLE_X - 4);
+    rect.y = (int16_t)(PAGE_SETTINGS_TOGGLE_Y - 5);
+    rect.w = (int16_t)(PAGE_SETTINGS_TOGGLE_W + 8);
+    rect.h = (int16_t)(PAGE_SETTINGS_TOGGLE_H + 10);
+
+    return rect;
+}
 
 /*
  * Build the repaint rectangle for the brightness progress bar.
@@ -46,6 +75,30 @@ static UI_Rect Page_Settings_GetBrightnessRect(void)
     rect.y = PAGE_SETTINGS_BRIGHT_Y;
     rect.w = PAGE_SETTINGS_BRIGHT_W;
     rect.h = PAGE_SETTINGS_BRIGHT_H;
+
+    return rect;
+}
+
+/*
+ * Build the repaint rectangle for the theme value field.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * Rectangle covering the right-side theme text and feedback frame.
+ *
+ * Side effects:
+ * None.
+ */
+static UI_Rect Page_Settings_GetThemeRect(void)
+{
+    UI_Rect rect;
+
+    rect.x = PAGE_SETTINGS_VALUE_X;
+    rect.y = (int16_t)(PAGE_SETTINGS_ROW_Y0 + (2 * PAGE_SETTINGS_ROW_STEP) + 10);
+    rect.w = PAGE_SETTINGS_VALUE_W;
+    rect.h = PAGE_SETTINGS_VALUE_H;
 
     return rect;
 }
@@ -151,6 +204,10 @@ static void Page_Settings_ChangeValue(uint32_t now)
     if (g_settings_selected == 0U)
     {
         g_settings_animation ^= 1U;
+        rect = Page_Settings_GetAnimationRect();
+        UI_FeedbackPress(&rect, now);
+        UI_PageInvalidate(&rect);
+        return;
     }
     else if (g_settings_selected == 1U)
     {
@@ -171,11 +228,11 @@ static void Page_Settings_ChangeValue(uint32_t now)
         {
             g_settings_theme = 0U;
         }
+        rect = Page_Settings_GetThemeRect();
+        UI_FeedbackPress(&rect, now);
+        UI_PageInvalidate(&rect);
+        return;
     }
-
-    rect = Page_Settings_GetRowRect(g_settings_selected);
-    UI_FeedbackPress(&rect, now);
-    Page_Settings_InvalidateRow(g_settings_selected);
 }
 
 /*
@@ -282,7 +339,7 @@ static void Page_Settings_Draw(const UI_Rect *clip)
         row.y,
         216,
         TEXT_ANIMATION,
-        (g_settings_animation != 0U) ? TEXT_ON : TEXT_OFF,
+        0,
         (g_settings_selected == 0U) ? 1U : 0U,
         UI_FeedbackIsActive(&row, g_settings_draw_now)
     );
@@ -304,7 +361,17 @@ static void Page_Settings_Draw(const UI_Rect *clip)
         (g_settings_selected == 2U) ? 1U : 0U,
         UI_FeedbackIsActive(&row, g_settings_draw_now)
     );
-    UI_DrawToggle(188, 63, g_settings_animation);
+    rect = Page_Settings_GetAnimationRect();
+    UI_DrawToggle(PAGE_SETTINGS_TOGGLE_X, PAGE_SETTINGS_TOGGLE_Y, g_settings_animation);
+    if (UI_FeedbackIsActive(&rect, g_settings_draw_now) != 0U)
+    {
+        UI_DrawFrame(rect.x, rect.y, rect.w, rect.h, UI_COLOR_WARN);
+    }
+    rect = Page_Settings_GetThemeRect();
+    if (UI_FeedbackIsActive(&rect, g_settings_draw_now) != 0U)
+    {
+        UI_DrawFrame(rect.x, rect.y, rect.w, rect.h, UI_COLOR_WARN);
+    }
     UI_DrawFocusMarker(12, UI_FocusAnimGetY(&g_settings_focus_anim), (int16_t)UI_ROW_H, UI_COLOR_ACCENT);
     UI_DrawFooter(TEXT_FOOTER_SETTINGS);
 }

@@ -39,7 +39,7 @@ typedef struct
 {
     UI_RenderState state;              // Current renderer state.
     UI_Rect dirty;                     // Dirty rectangle being consumed.
-    UI_Rect strip;                     // Current full-width strip.
+    UI_Rect strip;                     // Current x-clipped strip.
     int16_t next_y;                    // Next Y coordinate inside dirty.
     uint8_t buffer_index;              // Active buffer index.
 } UI_RenderContext;
@@ -84,11 +84,11 @@ static uint8_t UI_RendererFindFreeBuffer(uint8_t *index_out)
 }
 
 /*
- * Prepare the next full-width strip from the active dirty rectangle.
+ * Prepare the next x-clipped strip from the active dirty rectangle.
  *
- * The first renderer version sends full-width strips for the dirty Y range.
- * This guarantees every transmitted byte comes from freshly rendered page
- * content, while still avoiding a full 240x240 framebuffer.
+ * The renderer slices the dirty rectangle by Y, but preserves the dirty x/w
+ * window for every strip. This reduces SPI traffic for narrow controls while
+ * still using the same fixed maximum strip buffer allocation.
  *
  * Parameters:
  * None.
@@ -117,9 +117,9 @@ static uint8_t UI_RendererPrepareStrip(void)
         strip_h = (int16_t)(dirty_bottom - g_ui_renderer.next_y);
     }
 
-    g_ui_renderer.strip.x = 0;
+    g_ui_renderer.strip.x = g_ui_renderer.dirty.x;
     g_ui_renderer.strip.y = g_ui_renderer.next_y;
-    g_ui_renderer.strip.w = (int16_t)UI_SCREEN_W;
+    g_ui_renderer.strip.w = g_ui_renderer.dirty.w;
     g_ui_renderer.strip.h = strip_h;
 
     return 1U;
@@ -135,7 +135,7 @@ static uint8_t UI_RendererPrepareStrip(void)
  * None.
  *
  * Side effects:
- * Writes one full-width strip buffer and marks it READY.
+ * Writes one x-clipped strip buffer and marks it READY.
  */
 static void UI_RendererDrawStrip(const UI_PageOps *page)
 {
@@ -207,6 +207,7 @@ static uint8_t UI_RendererSubmitStrip(void)
 
     buffer->state = UI_BUFFER_SENDING;
     g_ui_renderer_stats.strips_submitted++;
+    g_ui_renderer_stats.bytes_submitted += buffer->valid_length;
     return 1U;
 }
 
@@ -431,4 +432,5 @@ void UI_RendererResetStats(void)
     g_ui_renderer_stats.dirty_rects_started = 0U;
     g_ui_renderer_stats.strips_drawn = 0U;
     g_ui_renderer_stats.strips_submitted = 0U;
+    g_ui_renderer_stats.bytes_submitted = 0U;
 }

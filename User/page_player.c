@@ -19,6 +19,9 @@
 #define PLAYER_SCAN_W          30       // Moving scan band width.
 #define PLAYER_SPRITE_SIZE     12       // Moving block size.
 #define PLAYER_WAVE_COUNT      8U       // Number of generated waveform bars.
+#define PLAYER_ORBIT_COUNT     8U       // Number of generated orbit dots.
+#define PLAYER_DASH_COUNT      6U       // Number of generated background dashes.
+#define PLAYER_TRAIL_COUNT     4U       // Number of generated trail blocks.
 #define PLAYER_STATE_X         24       // State panel left coordinate.
 #define PLAYER_STATE_Y        158       // State panel top coordinate.
 #define PLAYER_STATE_W        192       // State panel width.
@@ -288,12 +291,82 @@ static void Page_Player_FormatU16(uint16_t value, char *buffer, uint8_t buffer_s
 }
 
 /*
+ * Draw extra generated details for the PLAYER animation.
+ *
+ * This helper keeps the animation richer without storing image frames. All
+ * positions are derived from g_player_frame with small integer tables and
+ * modulo arithmetic, so the RAM cost stays fixed and the drawing remains safe
+ * for narrow dirty-window clipping.
+ *
+ * Parameters:
+ * rect: Animation canvas rectangle.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Draws dashes, orbit dots, and trail blocks inside the animation canvas.
+ */
+static void Page_Player_DrawGeneratedDetails(const UI_Rect *rect)
+{
+    static const int8_t orbit_x[PLAYER_ORBIT_COUNT] = {0, 11, 16, 11, 0, -11, -16, -11};
+    static const int8_t orbit_y[PLAYER_ORBIT_COUNT] = {-16, -11, 0, 11, 16, 11, 0, -11};
+    uint8_t index;
+    uint8_t phase;
+    int16_t center_x;
+    int16_t center_y;
+    int16_t x;
+    int16_t y;
+    uint16_t color;
+
+    if (rect == 0)
+    {
+        return;
+    }
+
+    for (index = 0U; index < PLAYER_DASH_COUNT; index++)
+    {
+        x = (int16_t)(rect->x + 8 +
+            (int16_t)(((uint32_t)g_player_frame * 2U + (uint32_t)index * 28U) %
+            (uint16_t)(rect->w - 28)));
+        y = (int16_t)(rect->y + 12 + ((int16_t)index * 10));
+        UI_DrawRect(x, y, 14, 2, UI_COLOR_DIM);
+    }
+
+    center_x = (int16_t)(rect->x + rect->w - 42);
+    center_y = (int16_t)(rect->y + 38);
+    UI_DrawFrame((int16_t)(center_x - 22), (int16_t)(center_y - 22), 44, 44, UI_COLOR_DIM);
+    for (index = 0U; index < PLAYER_ORBIT_COUNT; index++)
+    {
+        phase = (uint8_t)(((g_player_frame / 2U) + index) & 7U);
+        color = ((index & 1U) == 0U) ? UI_COLOR_WARN : UI_COLOR_ACCENT;
+        UI_DrawRect(
+            (int16_t)(center_x + orbit_x[phase] - 1),
+            (int16_t)(center_y + orbit_y[phase] - 1),
+            3,
+            3,
+            color
+        );
+    }
+
+    for (index = 0U; index < PLAYER_TRAIL_COUNT; index++)
+    {
+        x = (int16_t)(rect->x + 28 +
+            (int16_t)(((uint32_t)g_player_frame * 5U + (uint32_t)index * 17U) %
+            (uint16_t)(rect->w - 64)));
+        y = (int16_t)(rect->y + 70 - ((int16_t)index * 6));
+        color = (index == 0U) ? UI_COLOR_OK : UI_COLOR_SURFACE_2;
+        UI_DrawRect(x, y, (int16_t)(12 - ((int16_t)index * 2)), 4, color);
+    }
+}
+
+/*
  * Draw the generated animation canvas.
  *
- * PLAYING uses a moving scan band, a small block, and generated waveform bars
- * to exercise continuous local refresh. STOPPED and PAUSED keep the canvas
- * deterministic and static, proving the state machine can hold a frame without
- * background redraw work.
+ * PLAYING uses a moving scan band, a sprite block, waveform bars, background
+ * dashes, orbit dots, and trail blocks to exercise continuous local refresh.
+ * STOPPED and PAUSED keep the canvas deterministic and static, proving the
+ * state machine can hold a frame without background redraw work.
  *
  * Parameters:
  * None.
@@ -348,6 +421,7 @@ static void Page_Player_DrawAnim(void)
     UI_DrawText(34, 58, "F", UI_COLOR_MUTED);
     Page_Player_FormatU16(g_player_frame, frame_text, (uint8_t)sizeof(frame_text));
     UI_DrawText(50, 58, frame_text, UI_COLOR_TEXT);
+    Page_Player_DrawGeneratedDetails(&rect);
 
     base_y = (int16_t)(rect.y + rect.h - 14);
     for (index = 0U; index < PLAYER_WAVE_COUNT; index++)

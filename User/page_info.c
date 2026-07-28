@@ -4,10 +4,10 @@
 #include "ui_renderer.h"
 
 #define TEXT_INFO_TITLE        "\xCF\xB5\xCD\xB3\xD0\xC5\xCF\xA2"
-#define TEXT_MCU              "MCU"
-#define TEXT_LCD              "LCD"
 #define TEXT_STRIP            "STRIP"
+#define TEXT_BYTES            "BYTES"
 #define TEXT_BUSY             "BUSY"
+#define TEXT_DMA              "DMA"
 #define TEXT_DIRTY            "DIRTY"
 #define TEXT_FOOTER_INFO      "\xD7\xF3\xBC\xFC\xB7\xB5\xBB\xD8  SET\xC9\xE8\xD6\xC3"
 
@@ -61,7 +61,12 @@ static void Page_Info_FormatU32(uint32_t value, char *buffer, uint8_t buffer_siz
 }
 
 /*
- * Format dirty queue occupancy as max/current.
+ * Format dirty queue health as max/current/overflow.
+ *
+ * The INFO page has only a narrow value column. The first two digits show the
+ * maximum and current pending dirty count; the last digit shows the low digit
+ * of overflow_count so an on-board stress test can still reveal promotion to
+ * full-screen repaint without formatted stdio.
  *
  * Parameters:
  * stats: Dirty queue statistics snapshot.
@@ -76,7 +81,7 @@ static void Page_Info_FormatU32(uint32_t value, char *buffer, uint8_t buffer_siz
  */
 static void Page_Info_FormatDirty(const UI_DirtyStats *stats, char *buffer, uint8_t buffer_size)
 {
-    if ((stats == 0) || (buffer == 0) || (buffer_size < 4U))
+    if ((stats == 0) || (buffer == 0) || (buffer_size < 6U))
     {
         return;
     }
@@ -84,7 +89,9 @@ static void Page_Info_FormatDirty(const UI_DirtyStats *stats, char *buffer, uint
     buffer[0] = (char)('0' + stats->max_pending_rects);
     buffer[1] = '/';
     buffer[2] = (char)('0' + stats->pending_rects);
-    buffer[3] = '\0';
+    buffer[3] = '/';
+    buffer[4] = (char)('0' + (uint8_t)(stats->overflow_count % 10U));
+    buffer[5] = '\0';
 }
 
 /*
@@ -159,22 +166,26 @@ static void Page_Info_Draw(const UI_Rect *clip)
     UI_RendererStats renderer_stats;
     UI_DirtyStats dirty_stats;
     char strip_text[8];
+    char bytes_text[8];
     char busy_text[8];
-    char dirty_text[5];
+    char dma_text[8];
+    char dirty_text[8];
 
     (void)clip;
 
     UI_RendererGetStats(&renderer_stats);
     UI_DirtyGetStats(&dirty_stats);
     Page_Info_FormatU32(renderer_stats.strips_submitted, strip_text, (uint8_t)sizeof(strip_text));
+    Page_Info_FormatU32(renderer_stats.bytes_submitted, bytes_text, (uint8_t)sizeof(bytes_text));
     Page_Info_FormatU32(renderer_stats.busy_returns, busy_text, (uint8_t)sizeof(busy_text));
+    Page_Info_FormatU32(renderer_stats.dma_busy_returns, dma_text, (uint8_t)sizeof(dma_text));
     Page_Info_FormatDirty(&dirty_stats, dirty_text, (uint8_t)sizeof(dirty_text));
 
     UI_DrawStatusBar(TEXT_INFO_TITLE, UI_COLOR_OK);
-    Page_Info_DrawRow(42, TEXT_MCU, "STM32F103C8");
-    Page_Info_DrawRow(76, TEXT_LCD, "ST7789");
-    Page_Info_DrawRow(110, TEXT_STRIP, strip_text);
-    Page_Info_DrawRow(144, TEXT_BUSY, busy_text);
+    Page_Info_DrawRow(42, TEXT_STRIP, strip_text);
+    Page_Info_DrawRow(76, TEXT_BYTES, bytes_text);
+    Page_Info_DrawRow(110, TEXT_BUSY, busy_text);
+    Page_Info_DrawRow(144, TEXT_DMA, dma_text);
     Page_Info_DrawRow(178, TEXT_DIRTY, dirty_text);
     UI_DrawFooter(TEXT_FOOTER_INFO);
 }

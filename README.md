@@ -11,23 +11,23 @@
 - 已接入 5D 摇杆按键输入。
 - 已完成 HOME / PLAYER / SETTINGS / INFO 页面框架。
 - 已实现脏矩形局部刷新。
-- 已实现 UI renderer 条带双缓冲，页面绘制先写入 240x4 RGB565 条带 buffer，再经 LCD DMA 送屏。
+- 已实现 UI renderer 条带双缓冲，页面绘制先写入最高 240x4 RGB565 条带 buffer，再按 dirty 的 `x/w` 窄窗口经 LCD DMA 送屏。
 - 已实现 16x16 中文子集字库和放大 ASCII 字体。
 - 已实现 HOME / SETTINGS 焦点条动画。
-- 已实现 PLAYER 程序生成动画，用扫描条、移动块、波形和帧计数验证持续局部刷新。
+- 已实现 PLAYER 程序生成动画，用扫描条、移动块、波形、轨道点、拖尾块和帧计数验证持续局部刷新。
 - 已修复焦点条抽动、快速移动黄色残留和蓝条断裂问题。
 - 已统一 HOME / PLAYER / SETTINGS 的短按反馈，HOME 进入页面前会显示一次 pressed 反馈。
-- 已提供 renderer / dirty 轻量统计接口，便于观察 UI 刷新积压。
+- 已提供 renderer / dirty 轻量统计接口，INFO 页可观察条带数、发送字节、renderer 忙、DMA 忙和 dirty 积压。
 - 当前 STM32F103C8 Flash/RAM 不适合内置真实 GIF；GIF 播放源码和历史文档只作为资料保留，不再作为当前主线计划。
 
 当前最新验证构建结果：
 
 ```text
 0 Error(s), 0 Warning(s)
-Code=12804
+Code=13348
 RO-data=1988
 RW-data=40
-ZI-data=6400
+ZI-data=6408
 ```
 
 ## 硬件
@@ -129,7 +129,7 @@ UP/DOWN 移动焦点，MID/RIGHT 进入。
 当前是轻量程序动画验证页：
 
 - 明确显示不内置 GIF。
-- 使用扫描条、移动块、波形条和帧计数生成动画，不存图片帧。
+- 使用扫描条、移动块、波形条、轨道点、背景短线、拖尾块和帧计数生成动画，不存图片帧。
 - RIGHT 从头播放。
 - MID/OK 播放/暂停切换。
 - LEFT 返回。
@@ -147,7 +147,7 @@ LEFT 返回，RIGHT/MID 修改当前项。
 
 ### INFO
 
-显示 MCU、LCD、条带提交数、renderer 忙返回数和 dirty 队列 max/current。
+显示条带提交数、累计发送字节、renderer 忙返回数、DMA 忙返回数和 dirty 队列 max/current/overflow。
 
 ## 关键实现
 
@@ -179,19 +179,19 @@ STM32F103C8T6 RAM 只有约 20 KB，因此不能保存整屏图像。当前策�
 
 ### 条带双缓冲刷新
 
-普通 UI 变化使用 `UI_DirtyAdd()`，会裁剪并合并相近区域。`ui_renderer` 从 dirty 队列取出刷新范围后，按 4 像素高切成全宽条带：
+普通 UI 变化使用 `UI_DirtyAdd()`，会裁剪并合并相近区域。`ui_renderer` 从 dirty 队列取出刷新范围后，保留 dirty 的 `x/w`，再按 4 像素高切成窄条带：
 
 ```text
-dirty Y 范围
+dirty x/w + Y 范围
     ↓
-240 x 4 RGB565 strip buffer
+最多 240 x 4 RGB565 strip buffer
     ↓
 ST7789 address window
     ↓
 SPI2 TX DMA
 ```
 
-当前没有使用 240x240 全帧缓冲，只保留两个 240x4 条带 buffer：
+当前没有使用 240x240 全帧缓冲，只保留两个最大 240x4 条带 buffer：
 
 ```text
 240 x 4 x 2 x 2 = 3840 字节
@@ -208,9 +208,9 @@ SPI2 TX DMA
 
 这些接口不改变屏幕显示行为，也不依赖串口输出。
 
-### 阶段 C/D 验收状态
+### 窄条带刷新状态
 
-已完成条带双缓冲和 `ui_draw` buffer 绘制改造。上板快速上下移动验证后，黄色历史残留和蓝条断裂已修复。当前限制是：renderer 仍按 dirty 的 Y 范围发送全宽条带，尚未实现真正按 `x/w` 的窄区域条带发送。
+已完成条带双缓冲和 `ui_draw` buffer 绘制改造。renderer 现在按 dirty 的 `x/w` 发送窄区域条带；`ui_draw` 写入 buffer 时使用相对条带坐标，避免窄窗口发送错位。上板快速上下移动验证过的黄色历史残留和蓝条断裂修复仍保留。
 
 ## 目录说明
 
@@ -305,7 +305,7 @@ RAM 无法承受整帧缓存
 
 下一阶段继续完善轻量 UI 组件：
 
-1. 继续优化 SETTINGS 其他值的局部刷新。
-2. PLAYER 动画增加更多程序生成图形。
-3. 根据 INFO 页统计判断是否出现 DMA 忙、dirty 溢出或 UI 积压。
+1. 上板打开 PLAYER 播放动画，再进入 INFO 页观察 `BYTES`、`BUSY`、`DMA`、`DIRTY` 是否持续异常增长。
+2. 如果 `DMA` 或 `BUSY` 增长过快，优先降低 PLAYER 动画刷新频率或继续合并小 dirty。
+3. 如果 `DIRTY` 第三位 overflow 变动，说明 dirty 队列发生过全屏升级，需要减少同一轮入队数量。
 4. 保持历史 GIF 工具和文档在 `Tools/`、`docs/` 中，但不纳入当前 Keil 主线。
