@@ -147,7 +147,7 @@ LEFT 返回，RIGHT/MID 修改当前项。
 
 ### INFO
 
-显示条带提交数、累计发送字节、renderer 忙返回数、DMA 忙返回数和 dirty 队列 max/current/overflow。
+显示进入 INFO 时的条带提交数、累计发送字节、renderer 忙返回数、DMA 忙返回数和 dirty 队列 max/current/overflow。OK/RIGHT 可重新抓取一次统计快照，避免 renderer 分条带绘制时同一个数字由不同计数值拼接。
 
 ## 关键实现
 
@@ -305,7 +305,7 @@ RAM 无法承受整帧缓存
 
 下一阶段继续完善轻量 UI 组件：
 
-1. 上板打开 PLAYER 播放动画，再进入 INFO 页观察 `BYTES`、`BUSY`、`DMA`、`DIRTY` 是否持续异常增长。
+1. 上板打开 PLAYER 播放动画，再进入 INFO 页观察 `BYTES`、`BUSY`、`DMA`、`DIRTY`；需要刷新统计时按 OK/RIGHT。
 2. 如果 `DMA` 或 `BUSY` 增长过快，优先降低 PLAYER 动画刷新频率或继续合并小 dirty。
 3. 如果 `DIRTY` 第三位 overflow 变动，说明 dirty 队列发生过全屏升级，需要减少同一轮入队数量。
 4. 保持历史 GIF 工具和文档在 `Tools/`、`docs/` 中，但不纳入当前 Keil 主线。

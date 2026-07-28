@@ -11,12 +11,18 @@
 #define TEXT_DIRTY            "DIRTY"
 #define TEXT_FOOTER_INFO      "\xD7\xF3\xBC\xFC\xB7\xB5\xBB\xD8  SET\xC9\xE8\xD6\xC3"
 
+static char g_info_strip_text[8];
+static char g_info_bytes_text[8];
+static char g_info_busy_text[8];
+static char g_info_dma_text[8];
+static char g_info_dirty_text[8];
+
 /*
  * Convert a 32-bit counter to compact decimal ASCII.
  *
  * INFO draws renderer counters without using formatted stdio. When a counter
- * exceeds the display budget, the low digits are still useful for confirming
- * that the value is changing during manual tests.
+ * exceeds the display budget, the field is saturated with 9s so the screen
+ * still shows a normal numeric value instead of a misleading truncated one.
  *
  * Parameters:
  * value: Counter value to format.
@@ -34,12 +40,14 @@ static void Page_Info_FormatU32(uint32_t value, char *buffer, uint8_t buffer_siz
     char digits[10];
     uint8_t count;
     uint8_t index;
+    uint8_t max_digits;
 
     if ((buffer == 0) || (buffer_size < 2U))
     {
         return;
     }
 
+    max_digits = (uint8_t)(buffer_size - 1U);
     count = 0U;
     do
     {
@@ -48,9 +56,14 @@ static void Page_Info_FormatU32(uint32_t value, char *buffer, uint8_t buffer_siz
         count++;
     } while ((value != 0U) && (count < sizeof(digits)));
 
-    if (count >= buffer_size)
+    if (count > max_digits)
     {
-        count = (uint8_t)(buffer_size - 1U);
+        for (index = 0U; index < max_digits; index++)
+        {
+            buffer[index] = '9';
+        }
+        buffer[max_digits] = '\0';
+        return;
     }
 
     for (index = 0U; index < count; index++)
@@ -95,6 +108,38 @@ static void Page_Info_FormatDirty(const UI_DirtyStats *stats, char *buffer, uint
 }
 
 /*
+ * Capture one stable diagnostics snapshot for the INFO page.
+ *
+ * The strip renderer calls page draw functions once per transmitted strip.
+ * Reading live counters inside Page_Info_Draw would let different horizontal
+ * slices of the same number come from different counter values, producing
+ * visually broken digits. This function formats all values once before a
+ * redraw so every strip uses the same text.
+ *
+ * Parameters:
+ * None.
+ *
+ * Return value:
+ * None.
+ *
+ * Side effects:
+ * Updates the cached INFO text buffers.
+ */
+static void Page_Info_CaptureStats(void)
+{
+    UI_RendererStats renderer_stats;
+    UI_DirtyStats dirty_stats;
+
+    UI_RendererGetStats(&renderer_stats);
+    UI_DirtyGetStats(&dirty_stats);
+    Page_Info_FormatU32(renderer_stats.strips_submitted, g_info_strip_text, (uint8_t)sizeof(g_info_strip_text));
+    Page_Info_FormatU32(renderer_stats.bytes_submitted, g_info_bytes_text, (uint8_t)sizeof(g_info_bytes_text));
+    Page_Info_FormatU32(renderer_stats.busy_returns, g_info_busy_text, (uint8_t)sizeof(g_info_busy_text));
+    Page_Info_FormatU32(renderer_stats.dma_busy_returns, g_info_dma_text, (uint8_t)sizeof(g_info_dma_text));
+    Page_Info_FormatDirty(&dirty_stats, g_info_dirty_text, (uint8_t)sizeof(g_info_dirty_text));
+}
+
+/*
  * Enter the information page.
  *
  * Parameters:
@@ -104,10 +149,11 @@ static void Page_Info_FormatDirty(const UI_DirtyStats *stats, char *buffer, uint
  * None.
  *
  * Side effects:
- * None.
+ * Captures a stable renderer and dirty statistics snapshot for drawing.
  */
 static void Page_Info_OnEnter(void)
 {
+    Page_Info_CaptureStats();
 }
 
 /*
@@ -120,13 +166,22 @@ static void Page_Info_OnEnter(void)
  * None.
  *
  * Side effects:
- * LEFT returns to HOME.
+ * LEFT returns to HOME. OK and RIGHT refresh the displayed diagnostics
+ * snapshot and request a redraw.
  */
 static void Page_Info_OnEvent(const UI_Event *event)
 {
     if (event->type == UI_EVENT_LEFT)
     {
         UI_PageBack();
+        return;
+    }
+
+    if ((event->type == UI_EVENT_OK) || (event->type == UI_EVENT_RIGHT))
+    {
+        Page_Info_CaptureStats();
+        UI_PageRequestRedraw();
+        return;
     }
 }
 
@@ -163,30 +218,14 @@ static void Page_Info_DrawRow(int16_t y, const char *label, const char *value)
  */
 static void Page_Info_Draw(const UI_Rect *clip)
 {
-    UI_RendererStats renderer_stats;
-    UI_DirtyStats dirty_stats;
-    char strip_text[8];
-    char bytes_text[8];
-    char busy_text[8];
-    char dma_text[8];
-    char dirty_text[8];
-
     (void)clip;
 
-    UI_RendererGetStats(&renderer_stats);
-    UI_DirtyGetStats(&dirty_stats);
-    Page_Info_FormatU32(renderer_stats.strips_submitted, strip_text, (uint8_t)sizeof(strip_text));
-    Page_Info_FormatU32(renderer_stats.bytes_submitted, bytes_text, (uint8_t)sizeof(bytes_text));
-    Page_Info_FormatU32(renderer_stats.busy_returns, busy_text, (uint8_t)sizeof(busy_text));
-    Page_Info_FormatU32(renderer_stats.dma_busy_returns, dma_text, (uint8_t)sizeof(dma_text));
-    Page_Info_FormatDirty(&dirty_stats, dirty_text, (uint8_t)sizeof(dirty_text));
-
     UI_DrawStatusBar(TEXT_INFO_TITLE, UI_COLOR_OK);
-    Page_Info_DrawRow(42, TEXT_STRIP, strip_text);
-    Page_Info_DrawRow(76, TEXT_BYTES, bytes_text);
-    Page_Info_DrawRow(110, TEXT_BUSY, busy_text);
-    Page_Info_DrawRow(144, TEXT_DMA, dma_text);
-    Page_Info_DrawRow(178, TEXT_DIRTY, dirty_text);
+    Page_Info_DrawRow(42, TEXT_STRIP, g_info_strip_text);
+    Page_Info_DrawRow(76, TEXT_BYTES, g_info_bytes_text);
+    Page_Info_DrawRow(110, TEXT_BUSY, g_info_busy_text);
+    Page_Info_DrawRow(144, TEXT_DMA, g_info_dma_text);
+    Page_Info_DrawRow(178, TEXT_DIRTY, g_info_dirty_text);
     UI_DrawFooter(TEXT_FOOTER_INFO);
 }
 
